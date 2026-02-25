@@ -20,8 +20,12 @@ export type AppConfig = {
   diagnosticsTtlMs: number;
   sessionEnvHookTimeoutMs: number;
   sessionDefaultCwd: string;
+  toolsRoot: string;
   npmGlobalPrefix: string;
   npmCacheDir: string;
+  databricksHost?: string;
+  userAccessTokenHeader: string;
+  allowUserTokenAuth: boolean;
   serviceModules: string[];
   logLevel: "debug" | "info" | "warn" | "error";
   logPath?: string;
@@ -86,6 +90,28 @@ function directoryExists(candidate: string): boolean {
   }
 }
 
+function normalizeDatabricksHost(value: string): string {
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return value;
+  }
+
+  return `https://${value}`;
+}
+
+function resolveDatabricksHost(): string | undefined {
+  const explicitHost = envString("DATABRICKS_HOST");
+  if (explicitHost) {
+    return normalizeDatabricksHost(explicitHost);
+  }
+
+  const serverHostname = envString("DATABRICKS_SERVER_HOSTNAME");
+  if (serverHostname) {
+    return normalizeDatabricksHost(serverHostname);
+  }
+
+  return undefined;
+}
+
 export function loadConfig(): AppConfig {
   const cwd = process.cwd();
   const defaultCols = clamp(envNumber("DEFAULT_COLS", 120), 40, 400);
@@ -119,8 +145,12 @@ export function loadConfig(): AppConfig {
     diagnosticsTtlMs: clamp(envNumber("DIAGNOSTICS_TTL_MS", 5_000), 100, 60_000),
     sessionEnvHookTimeoutMs: clamp(envNumber("SESSION_ENV_HOOK_TIMEOUT_MS", 100), 10, 5_000),
     sessionDefaultCwd,
+    toolsRoot,
     npmGlobalPrefix,
     npmCacheDir,
+    databricksHost: resolveDatabricksHost(),
+    userAccessTokenHeader: (envString("USER_ACCESS_TOKEN_HEADER") || "x-forwarded-access-token").toLowerCase(),
+    allowUserTokenAuth: envBool("ALLOW_USER_TOKEN_AUTH", true),
     serviceModules: envList("SERVICE_MODULES"),
     logLevel: (envString("LOG_LEVEL") as AppConfig["logLevel"] | undefined) || "info",
     logPath: envString("LOG_PATH") || path.resolve(cwd, "logs", "databricks-app-terminal.jsonl"),

@@ -43,6 +43,7 @@ body {
   display: flex;
 }
 
+
 .tab {
   flex: 1 1 0;
   min-width: 0;
@@ -84,6 +85,28 @@ body {
 
 .tab-close:hover {
   color: var(--danger);
+}
+
+.tab-auth {
+  border: 1px solid var(--border);
+  background: #101620;
+  color: var(--muted);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  line-height: 1;
+  padding: 0.14rem 0.38rem;
+  text-transform: lowercase;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.tab-auth.user {
+  color: #8fd2ff;
+  border-color: #2e4f73;
+}
+
+.tab-auth:hover {
+  color: var(--fg);
 }
 
 .tab-label {

@@ -28,6 +28,21 @@
     return `${scheme}://${window.location.host}${path}`;
   }
 
+  function normalizeAuthMode(mode) {
+    return mode === "user" || mode === "user-token" ? "user" : "m2m";
+  }
+
+  function authBadgeText(mode) {
+    return mode === "user" ? "user" : "m2m";
+  }
+
+  function updateTabAuth(session) {
+    const mode = normalizeAuthMode(session.authMode);
+    session.authMode = mode;
+    session.authEl.textContent = authBadgeText(mode);
+    session.authEl.classList.toggle("user", mode === "user");
+  }
+
   function shortSessionLabel(sessionId) {
     return sessionId.slice(0, 8);
   }
@@ -144,6 +159,27 @@
       });
   }
 
+  function toggleSessionAuthMode(sessionId) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+
+    const nextMode = session.authMode === "user" ? "m2m" : "user";
+
+    api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/auth-mode`, {
+      mode: nextMode,
+    })
+      .then((data) => {
+        session.authMode = normalizeAuthMode(data.authMode);
+        updateTabAuth(session);
+      })
+      .catch((error) => {
+        console.warn(`Failed to switch auth mode (${sessionId}):`, error.message);
+        session.terminal.writeln(`\r\n[error] ${error.message}`);
+      });
+  }
+
   function connectSession(sessionId) {
     const session = sessions.get(sessionId);
     if (!session) {
@@ -171,6 +207,12 @@
           if (msg.type === "ready") {
             updateTabStatus(sessionId, "connected");
             fitAndResizeSession(session);
+            return;
+          }
+
+          if (msg.type === "auth_mode") {
+            session.authMode = normalizeAuthMode(msg.mode);
+            updateTabAuth(session);
             return;
           }
 
@@ -207,7 +249,7 @@
       });
   }
 
-  function mountSession(sessionId, activate = true) {
+  function mountSession(sessionId, authMode = "m2m", activate = true) {
     if (sessions.has(sessionId)) {
       if (activate) {
         activateSession(sessionId);
@@ -224,6 +266,11 @@
     closeEl.setAttribute("aria-label", `Close ${sessionId}`);
     closeEl.textContent = "×";
 
+    const authEl = document.createElement("button");
+    authEl.className = "tab-auth";
+    authEl.type = "button";
+    authEl.setAttribute("aria-label", `Toggle auth mode for ${sessionId}`);
+
     const labelEl = document.createElement("span");
     labelEl.className = "tab-label";
 
@@ -231,6 +278,7 @@
     statusEl.className = "tab-status disconnected";
 
     tabEl.appendChild(closeEl);
+    tabEl.appendChild(authEl);
     tabEl.appendChild(labelEl);
     tabEl.appendChild(statusEl);
     tabsEl.appendChild(tabEl);
@@ -260,6 +308,7 @@
       sessionId,
       tabEl,
       closeEl,
+      authEl,
       labelEl,
       paneEl,
       statusEl,
@@ -267,11 +316,13 @@
       fitAddon,
       socket: null,
       status: "disconnected",
+      authMode: normalizeAuthMode(authMode),
       dynamicTitle: "",
     };
 
     sessions.set(sessionId, state);
     updateTabTitle(state);
+    updateTabAuth(state);
 
     terminal.onData((data) => {
       if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
@@ -302,6 +353,11 @@
       killSession(sessionId);
     });
 
+    authEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleSessionAuthMode(sessionId);
+    });
+
     connectSession(sessionId);
 
     if (activate || !activeSessionId) {
@@ -312,7 +368,7 @@
   function createSession() {
     api("POST", "/api/sessions", {})
       .then((data) => {
-        mountSession(data.session.sessionId, true);
+        mountSession(data.session.sessionId, data.authMode || data.session.authMode || "m2m", true);
       })
       .catch((error) => {
         console.warn("Create session failed:", error.message);
@@ -323,7 +379,7 @@
     api("GET", "/api/sessions")
       .then((data) => {
         for (const session of data.sessions) {
-          mountSession(session.sessionId, false);
+          mountSession(session.sessionId, session.authMode || "m2m", false);
         }
 
         if (sessions.size > 0) {

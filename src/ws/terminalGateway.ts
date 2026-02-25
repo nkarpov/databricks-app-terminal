@@ -6,7 +6,7 @@ import { AppError } from "../api/types.js";
 import type { AppConfig } from "../config.js";
 import type { Logger } from "../logging/logger.js";
 import { assertValidSessionId } from "../sessions/ptySessionManager.js";
-import type { SessionManager, SessionExit } from "../sessions/types.js";
+import type { SessionManager, SessionAuthMode, SessionExit } from "../sessions/types.js";
 
 type ClientMessage =
   | { type: "input"; data: string }
@@ -18,6 +18,7 @@ type ServerMessage =
   | { type: "output"; data: string }
   | { type: "error"; message: string }
   | { type: "exit"; exitCode: number; signal?: number }
+  | { type: "auth_mode"; mode: SessionAuthMode }
   | { type: "pong" };
 
 function clamp(value: number, min: number, max: number): number {
@@ -168,6 +169,18 @@ export class TerminalGateway {
             type: "exit",
             exitCode,
             signal,
+          },
+          this.logger,
+          this.config.wsBackpressureBytes,
+          sessionId,
+        );
+      },
+      onAuthMode: (mode: SessionAuthMode) => {
+        send(
+          ws,
+          {
+            type: "auth_mode",
+            mode,
           },
           this.logger,
           this.config.wsBackpressureBytes,

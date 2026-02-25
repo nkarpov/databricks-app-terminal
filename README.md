@@ -2,6 +2,8 @@
 
 Databricks App Terminal is a multi-session web terminal for Databricks Apps.
 
+![Auth mode switching demo](./images/auth.gif)
+
 When running inside a Databricks App, terminal commands execute under the app's service principal identity. Databricks CLI is available in the runtime and works with app M2M auth out of the box.
 
 ## What this project provides
@@ -20,17 +22,25 @@ When running inside a Databricks App, terminal commands execute under the app's 
 - Tabs are always visible.
 - `+` creates a new tab/session.
 - `Cmd+T` (macOS) / `Ctrl+T` (Windows/Linux) creates a new tab/session.
+- Each tab shows a tiny auth badge (`m2m` / `user`); click it to toggle auth mode for that session.
 - Tab titles follow terminal title escape sequences from the running shell/app.
 
 ## Databricks identity model
 
 Inside Databricks Apps:
 
-- commands run as the app service principal
+- commands run as the app service principal by default
 - Databricks CLI is preinstalled in the runtime
-- CLI authentication uses app M2M context
+- default CLI authentication uses app M2M context
 
-This makes the terminal immediately usable for Databricks operations without manual auth bootstrapping.
+Optional per-session user mode:
+
+- create with `authMode: "user"` (or toggle per-tab badge)
+- backend reads the forwarded user token header (`x-forwarded-access-token` by default)
+- shell is seeded with `DATABRICKS_HOST` + `DATABRICKS_TOKEN` for Databricks CLI calls as that user
+- built-in `dbx-auth` command supports switching in-shell (`dbx-auth m2m`, `dbx-auth user`) and prints current mode with no args
+
+This keeps M2M as the safe default while allowing explicit user-delegated CLI sessions.
 
 ## Deploy
 
@@ -56,10 +66,11 @@ databricks apps deploy --profile SHARED
 
 ### Sessions
 - `GET /api/sessions`
-- `POST /api/sessions`
+- `POST /api/sessions` (optional body: `{ cwd?, cols?, rows?, authMode?: "m2m" | "user" }`)
 - `POST /api/sessions/:sessionId/attach`
 - `POST /api/sessions/:sessionId/input`
 - `POST /api/sessions/:sessionId/resize`
+- `POST /api/sessions/:sessionId/auth-mode` (body: `{ mode: "m2m" | "user" }`)
 - `DELETE /api/sessions/:sessionId`
 
 ### WebSocket
@@ -81,6 +92,12 @@ Core runtime env vars:
 Session defaults:
 
 - `SESSION_DEFAULT_CWD` (default `/app/python` on Databricks, else current directory)
+
+User mode (Databricks CLI delegation):
+
+- `DATABRICKS_HOST` (preferred) or `DATABRICKS_SERVER_HOSTNAME` (fallback)
+- `USER_ACCESS_TOKEN_HEADER` (default `x-forwarded-access-token`)
+- `ALLOW_USER_TOKEN_AUTH` (default `true`)
 
 Writable tool paths (for global npm installs in sessions):
 

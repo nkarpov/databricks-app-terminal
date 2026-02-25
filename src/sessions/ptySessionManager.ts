@@ -1,13 +1,17 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import pty, { type IPty } from "node-pty";
 import { AppError } from "../api/types.js";
 import type { Logger } from "../logging/logger.js";
 import type {
   AttachHandlers,
   CreateSessionInput,
+  SessionAuthMode,
   SessionExit,
   SessionInfo,
   SessionManager,
+  SetSessionAuthModeInput,
 } from "./types.js";
 
 export const SESSION_ID_PATTERN =
@@ -17,6 +21,18 @@ type SessionClient = {
   id: string;
   onData: (data: string) => void;
   onExit: (event: SessionExit) => void;
+  onAuthMode?: (mode: SessionAuthMode) => void;
+};
+
+type SessionAuthState = {
+  mode: SessionAuthMode;
+  userAccessToken?: string;
+  databricksHost?: string;
+  userAccessTokenHeader?: string;
+  originalDatabricksHost?: string;
+  originalDatabricksClientId?: string;
+  originalDatabricksClientSecret?: string;
+  stateFilePath: string;
 };
 
 type SessionRecord = {
@@ -24,6 +40,7 @@ type SessionRecord = {
   pty: IPty;
   clients: Map<string, SessionClient>;
   history: string;
+  auth: SessionAuthState;
 };
 
 export type InMemoryPtySessionManagerOptions = {
@@ -36,6 +53,8 @@ export type InMemoryPtySessionManagerOptions = {
   defaultRows: number;
   maxCols: number;
   maxRows: number;
+  authStateDir: string;
+  bashRcFilePath?: string;
   logger: Logger;
 };
 
@@ -51,6 +70,94 @@ function cleanEnv(overrides: Record<string, string | undefined>): Record<string,
     }
   }
   return out;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function isBashShell(shellPath: string): boolean {
+  return path.basename(shellPath) === "bash";
+}
+
+function renderAuthState(state: SessionAuthState): string {
+  const lines = [
+    `DBX_APP_TERMINAL_STATE_MODE=${shellQuote(state.mode)}`,
+    `DBX_APP_TERMINAL_STATE_DATABRICKS_HOST=${shellQuote(state.databricksHost || "")}`,
+    `DBX_APP_TERMINAL_STATE_DATABRICKS_TOKEN=${shellQuote(state.userAccessToken || "")}`,
+    `DBX_APP_TERMINAL_STATE_USER_TOKEN_HEADER=${shellQuote(state.userAccessTokenHeader || "x-forwarded-access-token")}`,
+    `DBX_APP_TERMINAL_STATE_ORIG_DATABRICKS_HOST_SET=${shellQuote(state.originalDatabricksHost === undefined ? "0" : "1")}`,
+    `DBX_APP_TERMINAL_STATE_ORIG_DATABRICKS_HOST=${shellQuote(state.originalDatabricksHost || "")}`,
+    `DBX_APP_TERMINAL_STATE_ORIG_DATABRICKS_CLIENT_ID_SET=${shellQuote(state.originalDatabricksClientId === undefined ? "0" : "1")}`,
+    `DBX_APP_TERMINAL_STATE_ORIG_DATABRICKS_CLIENT_ID=${shellQuote(state.originalDatabricksClientId || "")}`,
+    `DBX_APP_TERMINAL_STATE_ORIG_DATABRICKS_CLIENT_SECRET_SET=${shellQuote(state.originalDatabricksClientSecret === undefined ? "0" : "1")}`,
+    `DBX_APP_TERMINAL_STATE_ORIG_DATABRICKS_CLIENT_SECRET=${shellQuote(state.originalDatabricksClientSecret || "")}`,
+  ];
+
+  return `${lines.join("\n")}\n`;
+}
+
+function applyAuthModeToEnv(env: Record<string, string>, state: SessionAuthState): void {
+  env.DBX_APP_TERMINAL_AUTH_MODE = state.mode;
+  env.DBX_APP_TERMINAL_USER_TOKEN_HEADER = state.userAccessTokenHeader || "x-forwarded-access-token";
+
+  if (state.mode === "user") {
+    env.DATABRICKS_AUTH_TYPE = "pat";
+
+    if (state.databricksHost) {
+      env.DATABRICKS_HOST = state.databricksHost;
+    } else {
+      delete env.DATABRICKS_HOST;
+    }
+
+    if (state.userAccessToken) {
+      env.DATABRICKS_TOKEN = state.userAccessToken;
+    } else {
+      delete env.DATABRICKS_TOKEN;
+    }
+
+    delete env.DATABRICKS_CLIENT_ID;
+    delete env.DATABRICKS_CLIENT_SECRET;
+    return;
+  }
+
+  env.DATABRICKS_AUTH_TYPE = "oauth-m2m";
+  delete env.DATABRICKS_TOKEN;
+
+  if (state.originalDatabricksHost !== undefined) {
+    env.DATABRICKS_HOST = state.originalDatabricksHost;
+  } else {
+    delete env.DATABRICKS_HOST;
+  }
+
+  if (state.originalDatabricksClientId !== undefined) {
+    env.DATABRICKS_CLIENT_ID = state.originalDatabricksClientId;
+  } else {
+    delete env.DATABRICKS_CLIENT_ID;
+  }
+
+  if (state.originalDatabricksClientSecret !== undefined) {
+    env.DATABRICKS_CLIENT_SECRET = state.originalDatabricksClientSecret;
+  } else {
+    delete env.DATABRICKS_CLIENT_SECRET;
+  }
+}
+
+async function writeAuthStateFile(filePath: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.tmp-${randomUUID()}`;
+
+  await fs.writeFile(tempPath, content, {
+    mode: 0o600,
+  });
+
+  await fs.rename(tempPath, filePath);
+
+  try {
+    await fs.chmod(filePath, 0o600);
+  } catch {
+    // noop
+  }
 }
 
 export function assertValidSessionId(sessionId: string): void {
@@ -82,6 +189,10 @@ export class InMemoryPtySessionManager implements SessionManager {
 
   private readonly maxRows: number;
 
+  private readonly authStateDir: string;
+
+  private readonly bashRcFilePath?: string;
+
   private readonly logger: Logger;
 
   constructor(options: InMemoryPtySessionManagerOptions) {
@@ -94,15 +205,14 @@ export class InMemoryPtySessionManager implements SessionManager {
     this.defaultRows = options.defaultRows;
     this.maxCols = options.maxCols;
     this.maxRows = options.maxRows;
+    this.authStateDir = options.authStateDir;
+    this.bashRcFilePath = options.bashRcFilePath;
     this.logger = options.logger;
   }
 
   async listSessions(): Promise<SessionInfo[]> {
     return [...this.sessions.values()]
-      .map((session) => ({
-        ...session.info,
-        attachedClients: session.clients.size,
-      }))
+      .map((session) => this.toSessionInfo(session))
       .sort((a, b) => a.createdAt - b.createdAt);
   }
 
@@ -131,22 +241,42 @@ export class InMemoryPtySessionManager implements SessionManager {
     const rows = clamp(input.rows || this.defaultRows, 10, this.maxRows);
     const cwd = input.cwd || process.cwd();
 
+    const mergedEnv: Record<string, string> = {
+      ...cleanEnv(process.env as Record<string, string | undefined>),
+      ...cleanEnv(this.baseEnv),
+      ...cleanEnv(input.env || {}),
+      TERM: "xterm-256color",
+    };
+
+    const authMode: SessionAuthMode = input.authMode || "m2m";
+    const auth: SessionAuthState = {
+      mode: authMode,
+      userAccessToken: input.userAccessToken,
+      databricksHost: input.databricksHost,
+      userAccessTokenHeader: input.userAccessTokenHeader,
+      originalDatabricksHost: mergedEnv.DATABRICKS_HOST,
+      originalDatabricksClientId: mergedEnv.DATABRICKS_CLIENT_ID,
+      originalDatabricksClientSecret: mergedEnv.DATABRICKS_CLIENT_SECRET,
+      stateFilePath: path.join(this.authStateDir, `${input.sessionId}.env`),
+    };
+
+    applyAuthModeToEnv(mergedEnv, auth);
+    mergedEnv.DBX_APP_TERMINAL_AUTH_STATE_FILE = auth.stateFilePath;
+
+    await this.persistAuthState(auth);
+
     let p: IPty;
 
     try {
-      p = pty.spawn(this.shell, ["-i"], {
+      p = pty.spawn(this.shell, this.resolveShellArgs(), {
         name: "xterm-256color",
         cols,
         rows,
         cwd,
-        env: {
-          ...process.env,
-          ...cleanEnv(this.baseEnv),
-          ...cleanEnv(input.env || {}),
-          TERM: "xterm-256color",
-        },
+        env: mergedEnv,
       });
     } catch (error) {
+      await this.deleteAuthStateFile(auth.stateFilePath);
       throw new AppError(500, "SESSION_SPAWN_FAILED", "Failed to spawn PTY session", true, {
         sessionId: input.sessionId,
         shell: this.shell,
@@ -160,6 +290,7 @@ export class InMemoryPtySessionManager implements SessionManager {
       cwd,
       cols,
       rows,
+      authMode,
       attachedClients: 0,
     };
 
@@ -168,6 +299,7 @@ export class InMemoryPtySessionManager implements SessionManager {
       pty: p,
       clients: new Map(),
       history: "",
+      auth,
     };
 
     p.onData((data) => {
@@ -183,6 +315,8 @@ export class InMemoryPtySessionManager implements SessionManager {
       }
 
       this.sessions.delete(input.sessionId);
+      void this.deleteAuthStateFile(record.auth.stateFilePath);
+
       this.logger.info("session.exit", {
         sessionId: input.sessionId,
         exitCode,
@@ -197,6 +331,8 @@ export class InMemoryPtySessionManager implements SessionManager {
       cwd,
       cols,
       rows,
+      authMode,
+      hasCachedUserToken: Boolean(record.auth.userAccessToken),
     });
 
     return { ...info };
@@ -215,6 +351,11 @@ export class InMemoryPtySessionManager implements SessionManager {
     }
   }
 
+  async getSessionInfo(sessionId: string): Promise<SessionInfo> {
+    const session = this.getSession(sessionId);
+    return this.toSessionInfo(session);
+  }
+
   async attachSession(sessionId: string, handlers: AttachHandlers): Promise<() => void> {
     const session = this.getSession(sessionId);
 
@@ -222,6 +363,7 @@ export class InMemoryPtySessionManager implements SessionManager {
       id: randomUUID(),
       onData: handlers.onData,
       onExit: handlers.onExit,
+      onAuthMode: handlers.onAuthMode,
     };
 
     session.clients.set(client.id, client);
@@ -230,9 +372,70 @@ export class InMemoryPtySessionManager implements SessionManager {
       handlers.onData(session.history);
     }
 
+    handlers.onAuthMode?.(session.info.authMode);
+
     return () => {
       session.clients.delete(client.id);
     };
+  }
+
+  async setSessionAuthMode(sessionId: string, input: SetSessionAuthModeInput): Promise<SessionInfo> {
+    const session = this.getSession(sessionId);
+
+    if (input.mode === "user") {
+      const userAccessToken = input.userAccessToken || session.auth.userAccessToken;
+      if (!userAccessToken) {
+        throw new AppError(
+          400,
+          "USER_ACCESS_TOKEN_MISSING",
+          "User access token is required for user auth mode",
+          false,
+        );
+      }
+
+      const databricksHost = input.databricksHost || session.auth.databricksHost || session.auth.originalDatabricksHost;
+      if (!databricksHost) {
+        throw new AppError(
+          500,
+          "DATABRICKS_HOST_UNAVAILABLE",
+          "Databricks host is not configured for user auth mode",
+          true,
+        );
+      }
+
+      session.auth.mode = "user";
+      session.auth.userAccessToken = userAccessToken;
+      session.auth.databricksHost = databricksHost;
+      session.auth.userAccessTokenHeader = input.userAccessTokenHeader || session.auth.userAccessTokenHeader;
+      session.info.authMode = "user";
+    } else {
+      if (input.userAccessToken) {
+        session.auth.userAccessToken = input.userAccessToken;
+      }
+      if (input.databricksHost) {
+        session.auth.databricksHost = input.databricksHost;
+      }
+      if (input.userAccessTokenHeader) {
+        session.auth.userAccessTokenHeader = input.userAccessTokenHeader;
+      }
+
+      session.auth.mode = "m2m";
+      session.info.authMode = "m2m";
+    }
+
+    await this.persistAuthState(session.auth);
+
+    for (const client of session.clients.values()) {
+      client.onAuthMode?.(session.info.authMode);
+    }
+
+    this.logger.info("session.auth_mode", {
+      sessionId,
+      mode: session.info.authMode,
+      hasCachedUserToken: Boolean(session.auth.userAccessToken),
+    });
+
+    return this.toSessionInfo(session);
   }
 
   async writeInput(sessionId: string, data: string): Promise<void> {
@@ -266,6 +469,8 @@ export class InMemoryPtySessionManager implements SessionManager {
       session.pty.kill();
     } finally {
       this.sessions.delete(sessionId);
+      await this.deleteAuthStateFile(session.auth.stateFilePath);
+
       this.logger.info("session.kill", {
         sessionId,
       });
@@ -293,6 +498,33 @@ export class InMemoryPtySessionManager implements SessionManager {
         // ignore shutdown race
       }
     }
+  }
+
+  private resolveShellArgs(): string[] {
+    if (this.bashRcFilePath && isBashShell(this.shell)) {
+      return ["--rcfile", this.bashRcFilePath, "-i"];
+    }
+
+    return ["-i"];
+  }
+
+  private async persistAuthState(state: SessionAuthState): Promise<void> {
+    await writeAuthStateFile(state.stateFilePath, renderAuthState(state));
+  }
+
+  private async deleteAuthStateFile(filePath: string): Promise<void> {
+    try {
+      await fs.rm(filePath, { force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+
+  private toSessionInfo(session: SessionRecord): SessionInfo {
+    return {
+      ...session.info,
+      attachedClients: session.clients.size,
+    };
   }
 
   private getSession(sessionId: string): SessionRecord {

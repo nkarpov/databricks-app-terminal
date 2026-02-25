@@ -43,6 +43,28 @@ databricks auth env
 
 This should show Databricks auth context for the app runtime (service principal M2M).
 
+## Verify user session mode
+
+In the UI, click a tab's auth badge from `m2m` to `user`, then run:
+
+```bash
+dbx-auth
+databricks auth env
+```
+
+Expected:
+- `dbx-auth` prints `user`
+- Databricks CLI resolves auth via `DATABRICKS_HOST` + `DATABRICKS_TOKEN`
+
+To switch in-shell:
+
+```bash
+dbx-auth m2m
+dbx-auth user
+```
+
+If switching to user fails with `USER_ACCESS_TOKEN_MISSING`, confirm app ingress forwards `x-forwarded-access-token` (or set `USER_ACCESS_TOKEN_HEADER`).
+
 ## Writable paths and global npm installs
 
 `npm install -g ...` in terminal sessions is redirected to writable paths:

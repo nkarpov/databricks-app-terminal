@@ -3,12 +3,12 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
-import { fail, ok, toApiFailure } from "../api/types.js";
+import { AppError, fail, ok, toApiFailure } from "../api/types.js";
 import { parseBody, parseParams, parseQuery } from "../api/validation.js";
 import type { AppConfig } from "../config.js";
 import type { Logger } from "../logging/logger.js";
 import { SESSION_ID_PATTERN } from "../sessions/ptySessionManager.js";
-import type { SessionManager } from "../sessions/types.js";
+import type { SessionAuthMode, SessionManager } from "../sessions/types.js";
 import type { RuntimeDiagnosticsManager } from "../runtime/diagnostics.js";
 import type { ServiceRegistry } from "../services/registry.js";
 import { TerminalGateway } from "../ws/terminalGateway.js";
@@ -23,8 +23,13 @@ const createSessionBodySchema = z
     cwd: z.string().min(1).optional(),
     cols: z.number().int().positive().optional(),
     rows: z.number().int().positive().optional(),
+    authMode: z.enum(["m2m", "user", "user-token"]).optional(),
   })
   .default({});
+
+const setAuthModeBodySchema = z.object({
+  mode: z.enum(["m2m", "user", "user-token"]),
+});
 
 const writeInputBodySchema = z.object({
   data: z.string().min(1),
@@ -65,6 +70,96 @@ function requestId(req: Request): string {
 
 function requestActor(req: Request): string {
   return req.header("x-user-email") || req.ip || "unknown";
+}
+
+type RequestedAuthMode = "m2m" | "user" | "user-token";
+
+type SessionAuthResolutionInput = {
+  requestedMode: RequestedAuthMode | undefined;
+  userAccessToken?: string;
+  config: AppConfig;
+};
+
+type SessionAuthResolution = {
+  mode: SessionAuthMode;
+  env: Record<string, string>;
+  cachedUserAccessToken?: string;
+};
+
+function readHeaderValue(req: Request, name: string): string | undefined {
+  const raw = req.header(name);
+  if (!raw) {
+    return undefined;
+  }
+
+  const value = raw.trim();
+  return value.length > 0 ? value : undefined;
+}
+
+function normalizeAuthMode(mode: RequestedAuthMode | undefined): SessionAuthMode {
+  if (mode === "user" || mode === "user-token") {
+    return "user";
+  }
+
+  return "m2m";
+}
+
+function assertUserTokenAuthEnabled(config: AppConfig): void {
+  if (!config.allowUserTokenAuth) {
+    throw new AppError(403, "USER_TOKEN_AUTH_DISABLED", "User-token session mode is disabled", false);
+  }
+}
+
+function resolveSessionAuth(input: SessionAuthResolutionInput): SessionAuthResolution {
+  const mode = normalizeAuthMode(input.requestedMode);
+
+  if (mode === "m2m") {
+    return {
+      mode,
+      cachedUserAccessToken: input.userAccessToken,
+      env: {
+        DBX_APP_TERMINAL_AUTH_MODE: "m2m",
+        DBX_APP_TERMINAL_USER_TOKEN_HEADER: input.config.userAccessTokenHeader,
+      },
+    };
+  }
+
+  assertUserTokenAuthEnabled(input.config);
+
+  if (!input.userAccessToken) {
+    throw new AppError(
+      400,
+      "USER_ACCESS_TOKEN_MISSING",
+      "User access token header is required for authMode=user",
+      false,
+      {
+        header: input.config.userAccessTokenHeader,
+      },
+    );
+  }
+
+  if (!input.config.databricksHost) {
+    throw new AppError(
+      500,
+      "DATABRICKS_HOST_UNAVAILABLE",
+      "Databricks host is not configured for user auth mode",
+      true,
+      {
+        expectedEnv: ["DATABRICKS_HOST", "DATABRICKS_SERVER_HOSTNAME"],
+      },
+    );
+  }
+
+  return {
+    mode,
+    cachedUserAccessToken: input.userAccessToken,
+    env: {
+      DBX_APP_TERMINAL_AUTH_MODE: "user",
+      DBX_APP_TERMINAL_USER_TOKEN_HEADER: input.config.userAccessTokenHeader,
+      DATABRICKS_HOST: input.config.databricksHost,
+      DATABRICKS_TOKEN: input.userAccessToken,
+    },
+  };
 }
 
 export function createApp(services: AppServices): express.Express {
@@ -166,6 +261,13 @@ export function createApp(services: AppServices): express.Express {
       const actor = requestActor(req);
       const sessionCwd = payload.cwd || services.config.sessionDefaultCwd;
 
+      const userAccessToken = readHeaderValue(req, services.config.userAccessTokenHeader);
+      const auth = resolveSessionAuth({
+        requestedMode: payload.authMode,
+        userAccessToken,
+        config: services.config,
+      });
+
       const env = await services.services.buildSessionEnv({
         sessionId,
         actor,
@@ -177,10 +279,15 @@ export function createApp(services: AppServices): express.Express {
         cwd: sessionCwd,
         cols: payload.cols,
         rows: payload.rows,
+        authMode: auth.mode,
+        userAccessToken: auth.cachedUserAccessToken,
+        databricksHost: services.config.databricksHost,
+        userAccessTokenHeader: services.config.userAccessTokenHeader,
         env: {
           DBX_APP_TERMINAL_SESSION_ID: sessionId,
           DBX_APP_TERMINAL_ACTOR: actor,
           ...env.env,
+          ...auth.env,
         },
       });
 
@@ -189,12 +296,14 @@ export function createApp(services: AppServices): express.Express {
         sessionId,
         actor,
         cwd: sessionCwd,
+        authMode: session.authMode,
         warnings: env.warnings,
       });
 
       res.status(201).json(
         ok({
           session,
+          authMode: session.authMode,
           websocketPath: `/ws/terminal?sessionId=${encodeURIComponent(session.sessionId)}`,
         }),
       );
@@ -246,6 +355,56 @@ export function createApp(services: AppServices): express.Express {
           sessionId: params.sessionId,
           cols: payload.cols,
           rows: payload.rows,
+        }),
+      );
+    }),
+  );
+
+  app.get(
+    "/api/sessions/:sessionId/auth-mode",
+    withErrorBoundary(async (req, res) => {
+      const params = parseParams(req, sessionParamsSchema);
+      const session = await services.sessions.getSessionInfo(params.sessionId);
+
+      res.status(200).json(
+        ok({
+          sessionId: session.sessionId,
+          authMode: session.authMode,
+        }),
+      );
+    }),
+  );
+
+  app.post(
+    "/api/sessions/:sessionId/auth-mode",
+    withErrorBoundary(async (req, res) => {
+      const params = parseParams(req, sessionParamsSchema);
+      const payload = parseBody(req, setAuthModeBodySchema);
+      const mode = normalizeAuthMode(payload.mode);
+
+      if (mode === "user") {
+        assertUserTokenAuthEnabled(services.config);
+      }
+
+      const userAccessToken = readHeaderValue(req, services.config.userAccessTokenHeader);
+
+      const session = await services.sessions.setSessionAuthMode(params.sessionId, {
+        mode,
+        userAccessToken,
+        databricksHost: services.config.databricksHost,
+        userAccessTokenHeader: services.config.userAccessTokenHeader,
+      });
+
+      services.logger.info("api.session.auth_mode", {
+        requestId: res.locals.requestId,
+        sessionId: params.sessionId,
+        authMode: session.authMode,
+      });
+
+      res.status(200).json(
+        ok({
+          session,
+          authMode: session.authMode,
         }),
       );
     }),

@@ -4,11 +4,14 @@ import type {
   CreateSessionInput,
   SessionInfo,
   SessionManager,
+  SetSessionAuthModeInput,
 } from "../src/sessions/types.js";
 
 type SessionRecord = {
   info: SessionInfo;
   clients: Set<AttachHandlers>;
+  userAccessToken?: string;
+  databricksHost?: string;
 };
 
 function now(): number {
@@ -17,6 +20,8 @@ function now(): number {
 
 export class FakeSessionManager implements SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
+
+  readonly creates: CreateSessionInput[] = [];
 
   readonly writes: Array<{ sessionId: string; data: string }> = [];
 
@@ -36,18 +41,23 @@ export class FakeSessionManager implements SessionManager {
       });
     }
 
+    this.creates.push(input);
+
     const info: SessionInfo = {
       sessionId: input.sessionId,
       createdAt: now(),
       cwd: input.cwd || process.cwd(),
       cols: input.cols || 120,
       rows: input.rows || 30,
+      authMode: input.authMode || "m2m",
       attachedClients: 0,
     };
 
     this.sessions.set(input.sessionId, {
       info,
       clients: new Set(),
+      userAccessToken: input.userAccessToken,
+      databricksHost: input.databricksHost,
     });
 
     return info;
@@ -65,6 +75,20 @@ export class FakeSessionManager implements SessionManager {
     }
   }
 
+  async getSessionInfo(sessionId: string): Promise<SessionInfo> {
+    const record = this.sessions.get(sessionId);
+    if (!record) {
+      throw new AppError(404, "SESSION_NOT_FOUND", "Session not found", false, {
+        sessionId,
+      });
+    }
+
+    return {
+      ...record.info,
+      attachedClients: record.clients.size,
+    };
+  }
+
   async attachSession(sessionId: string, handlers: AttachHandlers): Promise<() => void> {
     const record = this.sessions.get(sessionId);
     if (!record) {
@@ -74,9 +98,52 @@ export class FakeSessionManager implements SessionManager {
     }
 
     record.clients.add(handlers);
+    handlers.onAuthMode?.(record.info.authMode);
 
     return () => {
       record.clients.delete(handlers);
+    };
+  }
+
+  async setSessionAuthMode(sessionId: string, input: SetSessionAuthModeInput): Promise<SessionInfo> {
+    const record = this.sessions.get(sessionId);
+    if (!record) {
+      throw new AppError(404, "SESSION_NOT_FOUND", "Session not found", false, {
+        sessionId,
+      });
+    }
+
+    if (input.mode === "user") {
+      const token = input.userAccessToken || record.userAccessToken;
+      if (!token) {
+        throw new AppError(400, "USER_ACCESS_TOKEN_MISSING", "User access token is required", false);
+      }
+
+      const host = input.databricksHost || record.databricksHost;
+      if (!host) {
+        throw new AppError(500, "DATABRICKS_HOST_UNAVAILABLE", "Databricks host is required", true);
+      }
+
+      record.userAccessToken = token;
+      record.databricksHost = host;
+      record.info.authMode = "user";
+    } else {
+      if (input.userAccessToken) {
+        record.userAccessToken = input.userAccessToken;
+      }
+      if (input.databricksHost) {
+        record.databricksHost = input.databricksHost;
+      }
+      record.info.authMode = "m2m";
+    }
+
+    for (const client of record.clients) {
+      client.onAuthMode?.(record.info.authMode);
+    }
+
+    return {
+      ...record.info,
+      attachedClients: record.clients.size,
     };
   }
 

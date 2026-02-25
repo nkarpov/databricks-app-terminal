@@ -28,8 +28,12 @@ function makeConfig(overrides?: Partial<AppConfig>): AppConfig {
     diagnosticsTtlMs: 5_000,
     sessionEnvHookTimeoutMs: 50,
     sessionDefaultCwd: process.cwd(),
+    toolsRoot: `${process.cwd()}/.test-tools`,
     npmGlobalPrefix: `${process.cwd()}/.test-npm-global`,
     npmCacheDir: `${process.cwd()}/.test-npm-cache`,
+    databricksHost: "https://adb-test.databricks.com",
+    userAccessTokenHeader: "x-forwarded-access-token",
+    allowUserTokenAuth: true,
     serviceModules: [],
     logLevel: "error",
     logPath: undefined,
@@ -93,6 +97,7 @@ test("session lifecycle endpoints work", async () => {
 
   const created = await request(app).post("/api/sessions").send({}).expect(201);
   assert.equal(created.body.ok, true);
+  assert.equal(created.body.data.authMode, "m2m");
 
   const sessionId = created.body.data.session.sessionId;
   assert.match(sessionId, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
@@ -125,6 +130,147 @@ test("session lifecycle endpoints work", async () => {
 
   const after = await request(app).get("/api/sessions").expect(200);
   assert.equal(after.body.data.sessions.length, 0);
+});
+
+test("session create supports user auth mode for Databricks CLI env", async () => {
+  const { app, sessionManager } = makeApp();
+
+  const created = await request(app)
+    .post("/api/sessions")
+    .set("x-forwarded-access-token", "user.token.value")
+    .send({
+      authMode: "user",
+    })
+    .expect(201);
+
+  assert.equal(created.body.ok, true);
+  assert.equal(created.body.data.authMode, "user");
+
+  assert.equal(sessionManager.creates.length, 1);
+  const env = sessionManager.creates[0].env || {};
+  assert.equal(env.DBX_APP_TERMINAL_AUTH_MODE, "user");
+  assert.equal(env.DATABRICKS_HOST, "https://adb-test.databricks.com");
+  assert.equal(env.DATABRICKS_TOKEN, "user.token.value");
+});
+
+test("user auth mode requires forwarded access token header", async () => {
+  const { app } = makeApp();
+
+  const response = await request(app)
+    .post("/api/sessions")
+    .send({
+      authMode: "user",
+    })
+    .expect(400);
+
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.error.code, "USER_ACCESS_TOKEN_MISSING");
+});
+
+test("user auth mode requires configured Databricks host", async () => {
+  const { app } = makeApp([], {
+    databricksHost: undefined,
+  });
+
+  const response = await request(app)
+    .post("/api/sessions")
+    .set("x-forwarded-access-token", "user.token.value")
+    .send({
+      authMode: "user",
+    })
+    .expect(500);
+
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.error.code, "DATABRICKS_HOST_UNAVAILABLE");
+});
+
+test("session auth mode can toggle and uses cached user token", async () => {
+  const { app, sessionManager } = makeApp();
+
+  const created = await request(app)
+    .post("/api/sessions")
+    .set("x-forwarded-access-token", "cached.user.token")
+    .send({
+      authMode: "m2m",
+    })
+    .expect(201);
+
+  const sessionId = created.body.data.session.sessionId;
+
+  const switchedToUser = await request(app)
+    .post(`/api/sessions/${encodeURIComponent(sessionId)}/auth-mode`)
+    .send({
+      mode: "user",
+    })
+    .expect(200);
+
+  assert.equal(switchedToUser.body.ok, true);
+  assert.equal(switchedToUser.body.data.authMode, "user");
+
+  const switchedToM2m = await request(app)
+    .post(`/api/sessions/${encodeURIComponent(sessionId)}/auth-mode`)
+    .send({
+      mode: "m2m",
+    })
+    .expect(200);
+
+  assert.equal(switchedToM2m.body.ok, true);
+  assert.equal(switchedToM2m.body.data.authMode, "m2m");
+
+  assert.equal(sessionManager.creates.length, 1);
+  assert.equal(sessionManager.creates[0].userAccessToken, "cached.user.token");
+});
+
+test("session auth mode endpoint returns current mode", async () => {
+  const { app } = makeApp();
+
+  const created = await request(app)
+    .post("/api/sessions")
+    .set("x-forwarded-access-token", "cached.user.token")
+    .send({
+      authMode: "m2m",
+    })
+    .expect(201);
+
+  const sessionId = created.body.data.session.sessionId;
+
+  const modeBefore = await request(app)
+    .get(`/api/sessions/${encodeURIComponent(sessionId)}/auth-mode`)
+    .expect(200);
+
+  assert.equal(modeBefore.body.ok, true);
+  assert.equal(modeBefore.body.data.authMode, "m2m");
+
+  await request(app)
+    .post(`/api/sessions/${encodeURIComponent(sessionId)}/auth-mode`)
+    .send({
+      mode: "user",
+    })
+    .expect(200);
+
+  const modeAfter = await request(app)
+    .get(`/api/sessions/${encodeURIComponent(sessionId)}/auth-mode`)
+    .expect(200);
+
+  assert.equal(modeAfter.body.ok, true);
+  assert.equal(modeAfter.body.data.authMode, "user");
+});
+
+test("session auth mode switch to user fails without cached or forwarded token", async () => {
+  const { app } = makeApp();
+
+  const created = await request(app).post("/api/sessions").send({}).expect(201);
+  const sessionId = created.body.data.session.sessionId;
+
+  const response = await request(app)
+    .post(`/api/sessions/${encodeURIComponent(sessionId)}/auth-mode`)
+    .send({
+      mode: "user",
+    })
+    .expect(400);
+
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.error.code, "USER_ACCESS_TOKEN_MISSING");
 });
 
 test("optional session env hook timeout does not block create", async () => {
