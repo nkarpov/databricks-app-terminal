@@ -550,12 +550,11 @@ export class InMemoryPtySessionManager implements SessionManager {
     agent?: string,
     sessionEnv?: Record<string, string>,
     model?: string,
-  ): { command: string; args: string[]; skipRcFile: boolean } {
+  ): { command: string; args: string[] } {
     if (!agent) {
       return {
         command: this.shell,
         args: this.resolveShellArgs(),
-        skipRcFile: false,
       };
     }
 
@@ -569,7 +568,6 @@ export class InMemoryPtySessionManager implements SessionManager {
       return {
         command: this.shell,
         args: this.resolveShellArgs(),
-        skipRcFile: false,
       };
     }
 
@@ -591,19 +589,20 @@ export class InMemoryPtySessionManager implements SessionManager {
     // bash --login profile scripts that may reset PATH. Use the session env
     // PATH (which includes shims and runtime bins) rather than process.env.PATH.
     const nodePath = sessionEnv?.PATH || process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
-    let preflight = `export PATH="${nodePath}";`;
+    let preflight = `export PATH=${shellQuote(nodePath)};`;
 
     if (agent === "codex") {
       // The auth hook may unset DATABRICKS_TOKEN in m2m mode. Re-assert Codex
       // proxy auth vars immediately before launching codex.
-      preflight += ` if [ -f "$HOME/.dbx_bearer_token" ]; then export DATABRICKS_TOKEN="$(tr -d '\\r\\n' < "$HOME/.dbx_bearer_token")"; fi; export DATABRICKS_AUTH_TYPE="pat"; unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET; if [ -z "\${DATABRICKS_TOKEN:-}" ]; then echo -e "\\n\\033[31m[error] missing DATABRICKS_TOKEN. Token bootstrap failed.\\033[0m\\n"; exec /bin/bash -i; fi;`;
+      // First try a fresh token exchange, then fall back to the cached token file.
+      const getTokenScript = shellQuote(path.join(process.cwd(), "scripts", "get-token.sh"));
+      preflight += ` if [ -x ${getTokenScript} ]; then __dbx_new_token="$(${getTokenScript} 2>/dev/null || true)"; if [ -n "$__dbx_new_token" ]; then export DATABRICKS_TOKEN="$__dbx_new_token"; printf '%s' "$__dbx_new_token" > "$HOME/.dbx_bearer_token" 2>/dev/null || true; fi; unset __dbx_new_token; fi; if [ -z "\${DATABRICKS_TOKEN:-}" ] && [ -f "$HOME/.dbx_bearer_token" ]; then export DATABRICKS_TOKEN="$(tr -d '\\r\\n' < "$HOME/.dbx_bearer_token")"; fi; export DATABRICKS_AUTH_TYPE="pat"; unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET; if [ -z "\${DATABRICKS_TOKEN:-}" ]; then echo -e "\\n\\033[31m[error] missing DATABRICKS_TOKEN. Token bootstrap failed.\\033[0m\\n"; exec /bin/bash -i; fi;`;
     }
 
     const checkAndRun = `${preflight} command -v ${config.bin} >/dev/null 2>&1 || { echo -e "\\n\\033[31m[error] '${config.bin}' not found on PATH. Run scripts/agent-setup.sh first.\\033[0m\\n"; exec /bin/bash -i; }; ${cmd}; exec /bin/bash -i`;
     return {
       command: "/bin/bash",
       args: ["--login", "-c", checkAndRun],
-      skipRcFile: true,
     };
   }
 

@@ -118,6 +118,7 @@ cat > "$HOME/.claude/settings.json" << SETTINGS
   }
 }
 SETTINGS
+chmod 600 "$HOME/.claude/settings.json"
 
 # ── Claude Code onboarding bypass ─────────────────────────────────────────
 APP_DIR="$(pwd)"
