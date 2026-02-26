@@ -283,7 +283,7 @@ export class InMemoryPtySessionManager implements SessionManager {
 
     await this.persistAuthState(auth);
 
-    const { command, args } = this.resolveSessionCommand(input.agent, mergedEnv);
+    const { command, args } = this.resolveSessionCommand(input.agent, mergedEnv, input.model);
 
     let p: IPty;
 
@@ -546,7 +546,11 @@ export class InMemoryPtySessionManager implements SessionManager {
     }
   }
 
-  private resolveSessionCommand(agent?: string, sessionEnv?: Record<string, string>): { command: string; args: string[]; skipRcFile: boolean } {
+  private resolveSessionCommand(
+    agent?: string,
+    sessionEnv?: Record<string, string>,
+    model?: string,
+  ): { command: string; args: string[]; skipRcFile: boolean } {
     if (!agent) {
       return {
         command: this.shell,
@@ -569,12 +573,33 @@ export class InMemoryPtySessionManager implements SessionManager {
       };
     }
 
-    const cmd = [config.bin, ...config.defaultArgs].join(" ");
+    const runtimeArgs = [...config.defaultArgs];
+    if (agent === "codex" && model) {
+      const trimmedModel = model.trim();
+      if (/^[A-Za-z0-9._:-]+$/.test(trimmedModel)) {
+        runtimeArgs.push("--model", trimmedModel);
+      } else {
+        this.logger.warn("session.model.invalid", {
+          agent,
+          model,
+        });
+      }
+    }
+
+    const cmd = [config.bin, ...runtimeArgs].join(" ");
     // Inject the session's PATH directly into the command so it survives
     // bash --login profile scripts that may reset PATH. Use the session env
     // PATH (which includes shims and runtime bins) rather than process.env.PATH.
     const nodePath = sessionEnv?.PATH || process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
-    const checkAndRun = `export PATH="${nodePath}"; command -v ${config.bin} >/dev/null 2>&1 || { echo -e "\\n\\033[31m[error] '${config.bin}' not found on PATH. Run scripts/agent-setup.sh first.\\033[0m\\n"; }; ${cmd}; exec /bin/bash -i`;
+    let preflight = `export PATH="${nodePath}";`;
+
+    if (agent === "codex") {
+      // The auth hook may unset DATABRICKS_TOKEN in m2m mode. Re-assert Codex
+      // proxy auth vars immediately before launching codex.
+      preflight += ` if [ -f "$HOME/.dbx_bearer_token" ]; then export DATABRICKS_TOKEN="$(tr -d '\\r\\n' < "$HOME/.dbx_bearer_token")"; fi; export DATABRICKS_AUTH_TYPE="pat"; unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET; if [ -z "\${DATABRICKS_TOKEN:-}" ]; then echo -e "\\n\\033[31m[error] missing DATABRICKS_TOKEN. Token bootstrap failed.\\033[0m\\n"; exec /bin/bash -i; fi;`;
+    }
+
+    const checkAndRun = `${preflight} command -v ${config.bin} >/dev/null 2>&1 || { echo -e "\\n\\033[31m[error] '${config.bin}' not found on PATH. Run scripts/agent-setup.sh first.\\033[0m\\n"; exec /bin/bash -i; }; ${cmd}; exec /bin/bash -i`;
     return {
       command: "/bin/bash",
       args: ["--login", "-c", checkAndRun],

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Optional agent setup script for Databricks App Terminal.
 # Run this before the app starts to enable Claude Code and Codex agent sessions.
 # Ports the proven patterns from coding-agents-databricks/startup.sh.
@@ -7,9 +7,34 @@
 #   command: ["bash", "-c", "source scripts/agent-setup.sh && npm run start"]
 #
 # Skip this entirely if you only need plain terminal sessions.
-set -e
+set -euo pipefail
 
-echo "[agent-setup] Starting agent environment configuration..."
+log() {
+  echo "[agent-setup] $*"
+}
+
+die() {
+  log "ERROR: $*"
+  exit 1
+}
+
+normalize_host() {
+  local raw="${1:-}"
+  raw="${raw#https://}"
+  raw="${raw#http://}"
+  raw="${raw%%/*}"
+  printf '%s' "$raw"
+}
+
+log "Starting agent environment configuration..."
+
+# Databricks App env is required for agent auth bootstrap.
+DBX_HOST_RAW="${DATABRICKS_HOST:-${DATABRICKS_SERVER_HOSTNAME:-}}"
+DBX_HOSTNAME="$(normalize_host "$DBX_HOST_RAW")"
+[[ -n "$DBX_HOSTNAME" ]] || die "Missing DATABRICKS_HOST (or DATABRICKS_SERVER_HOSTNAME)"
+[[ -n "${DATABRICKS_CLIENT_ID:-}" ]] || die "Missing DATABRICKS_CLIENT_ID"
+[[ -n "${DATABRICKS_CLIENT_SECRET:-}" ]] || die "Missing DATABRICKS_CLIENT_SECRET"
+DBX_HOST_URL="https://${DBX_HOSTNAME}"
 
 # ── Home directory ──────────────────────────────────────────────────────────
 export HOME="${HOME:-/home/app}"
@@ -22,15 +47,15 @@ mkdir -p "$HOME"
 APP_BIN="$(pwd)/node_modules/.bin"
 if [ -d "$APP_BIN" ]; then
     export PATH="$APP_BIN:$PATH"
-    echo "[agent-setup] Added node_modules/.bin to PATH: $APP_BIN"
+    log "Added node_modules/.bin to PATH: $APP_BIN"
 fi
 
 # Verify agent binaries are available
 for bin in claude codex; do
     if command -v "$bin" &>/dev/null; then
-        echo "[agent-setup] Found $bin at $(which $bin)"
+        log "Found $bin at $(which $bin)"
     else
-        echo "[agent-setup] WARNING: $bin not found on PATH"
+        log "WARNING: $bin not found on PATH"
     fi
 done
 
@@ -40,29 +65,27 @@ done
 # Write a .databrickscfg so the Databricks CLI and SDK can authenticate.
 cat > "$HOME/.databrickscfg" << DBCFG
 [DEFAULT]
-host = https://${DATABRICKS_HOST}
+host = ${DBX_HOST_URL}
 client_id = ${DATABRICKS_CLIENT_ID}
 client_secret = ${DATABRICKS_CLIENT_SECRET}
 
 [sandbox]
-host = https://${DATABRICKS_HOST}
+host = ${DBX_HOST_URL}
 client_id = ${DATABRICKS_CLIENT_ID}
 client_secret = ${DATABRICKS_CLIENT_SECRET}
 DBCFG
-echo "[agent-setup] Wrote ~/.databrickscfg"
+log "Wrote ~/.databrickscfg"
 
 # ── Exchange OAuth credentials for bearer token ────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 chmod +x "$SCRIPT_DIR/get-token.sh" 2>/dev/null || true
-DBX_BEARER_TOKEN=$(bash "$SCRIPT_DIR/get-token.sh" 2>/dev/null || echo "")
-
-if [ -z "$DBX_BEARER_TOKEN" ]; then
-    echo "[agent-setup] WARNING: Could not obtain bearer token. Agent auth may fail."
-fi
+DBX_BEARER_TOKEN="$(DATABRICKS_HOST="$DBX_HOSTNAME" bash "$SCRIPT_DIR/get-token.sh")"
+[[ -n "$DBX_BEARER_TOKEN" ]] || die "Token exchange returned an empty token"
 
 # ── Save bearer token for Codex sessions ───────────────────────────────────
 echo -n "$DBX_BEARER_TOKEN" > "$HOME/.dbx_bearer_token"
 chmod 600 "$HOME/.dbx_bearer_token"
+[[ -s "$HOME/.dbx_bearer_token" ]] || die "Failed to persist bearer token to ~/.dbx_bearer_token"
 
 # ── Databricks auth disambiguation ────────────────────────────────────────
 export DATABRICKS_AUTH_TYPE="oauth-m2m"
@@ -72,7 +95,7 @@ mkdir -p "$HOME/.claude"
 cat > "$HOME/.claude/settings.json" << SETTINGS
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://${DATABRICKS_HOST}/serving-endpoints/anthropic",
+    "ANTHROPIC_BASE_URL": "${DBX_HOST_URL}/serving-endpoints/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "${DBX_BEARER_TOKEN}",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "databricks-claude-opus-4-6",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "databricks-claude-sonnet-4-5",
@@ -115,6 +138,7 @@ mkdir -p "$HOME/.codex"
 
 cat > "$HOME/.codex/config.toml" << CODEXCFG
 profile = "default"
+# Databricks OpenAI proxy currently rejects web_search tool calls.
 web_search = "disabled"
 
 [profiles.default]
@@ -124,7 +148,7 @@ model_catalog_json = "${HOME}/.codex/databricks-models.json"
 
 [model_providers.proxy]
 name = "Databricks Proxy"
-base_url = "https://${DATABRICKS_HOST}/serving-endpoints"
+base_url = "${DBX_HOST_URL}/serving-endpoints"
 env_key = "DATABRICKS_TOKEN"
 wire_api = "responses"
 CODEXCFG
@@ -200,7 +224,28 @@ cat > "$HOME/.codex/databricks-models.json" << 'MODELS'
 }
 MODELS
 
+# ── Validate generated config ─────────────────────────────────────────────
+python3 - << 'PY'
+import json
+from pathlib import Path
+
+settings_path = Path.home() / ".claude" / "settings.json"
+data = json.loads(settings_path.read_text())
+env = data.get("env", {})
+base_url = env.get("ANTHROPIC_BASE_URL", "")
+token = env.get("ANTHROPIC_AUTH_TOKEN", "")
+if not base_url.startswith("https://") or "/serving-endpoints/anthropic" not in base_url:
+    raise SystemExit("agent-setup: invalid ANTHROPIC_BASE_URL in ~/.claude/settings.json")
+if not token:
+    raise SystemExit("agent-setup: missing ANTHROPIC_AUTH_TOKEN in ~/.claude/settings.json")
+PY
+
+grep -Eq '^base_url = "https://.*/serving-endpoints"$' "$HOME/.codex/config.toml" \
+  || die "Invalid Codex base_url in ~/.codex/config.toml"
+grep -q '^env_key = "DATABRICKS_TOKEN"$' "$HOME/.codex/config.toml" \
+  || die "Invalid Codex env_key in ~/.codex/config.toml"
+
 # ── Tell the app to load the agent env service ───────────────────────────
 export SERVICE_MODULES="./dist/services/agentEnvService.js"
 
-echo "[agent-setup] Agent environment configuration complete."
+log "Agent environment configuration complete."
