@@ -11,6 +11,3 @@ resources:
 targets:
   default:
     default: true
-  sandbox:
-    workspace:
-      profile: sandbox
