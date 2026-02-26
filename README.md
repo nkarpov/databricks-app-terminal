@@ -39,6 +39,7 @@ Session types are discovered dynamically from `terminal-types/*` at startup.
 - Included profiles in this repo: `claude`, `codex`, `pi` (plus built-in `terminal`).
 - Bundled logo font assets live under `public/assets/terminal-icons` (source SVGs in `assets/terminal-icons/src`).
 - Type launch scripts run on top of the base terminal runtime/auth model.
+- Type-specific launcher behavior and shared helper conventions are documented in `terminal-types/README.md`.
 
 ## Databricks identity model
 

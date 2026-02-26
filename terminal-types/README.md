@@ -44,3 +44,18 @@ Fields:
 - Use it to set env vars and/or `exec` a CLI.
 - If it returns without `exec`, the user stays in a regular shell.
 - Session auth mode (`m2m` / `user`) and Databricks auth env handling are already provided by core runtime.
+- Shared helpers for Databricks-backed agents live in `terminal-types/_shared/agent-bootstrap.sh` and `terminal-types/_shared/get-token.sh`.
+
+## Databricks-backed agent launchers
+
+The built-in `claude` and `codex` terminal types source shared helper logic from `terminal-types/_shared/`.
+
+- `agent-bootstrap.sh` writes `.databrickscfg`, exchanges OAuth token, and generates CLI config files.
+- `get-token.sh` performs service-principal OAuth token exchange (with `DATABRICKS_TOKEN` fallback).
+
+Launcher env knobs:
+
+- `DBX_APP_TERMINAL_CLAUDE_CMD` (default `claude`)
+- `DBX_APP_TERMINAL_CODEX_CMD` (default `codex`)
+- `DBX_APP_TERMINAL_CLAUDE_MODEL` (optional Claude model override)
+- `DBX_APP_TERMINAL_CODEX_MODEL` (default `databricks-gpt-5-3-codex`)
