@@ -14,7 +14,27 @@
         <button id="create-session" class="tab-add" type="button" aria-label="New tab">+</button>
       </div>
 
-      <main class="terminal-main" id="terminal-main"></main>
+      <main class="terminal-main" id="terminal-main">
+        <div id="session-picker" class="setup-screen" style="display:none">
+          <h2>New session</h2>
+          <div class="options" id="session-type-options">
+            <button class="opt-btn" data-type="terminal">
+              <span class="opt-name">Terminal</span>
+              <span class="opt-desc">Plain bash shell</span>
+            </button>
+            <button class="opt-btn" data-type="claude-code">
+              <span class="opt-name">Claude Code</span>
+              <span class="opt-desc">Anthropic &mdash; Claude on Databricks</span>
+            </button>
+            <button class="opt-btn" data-type="codex">
+              <span class="opt-name">Codex</span>
+              <span class="opt-desc">OpenAI &mdash; GPT on Databricks</span>
+            </button>
+          </div>
+          <div id="model-picker" class="options" style="display:none"></div>
+          <button class="back-link" id="picker-back" style="display:none">&larr; Back</button>
+        </div>
+      </main>
     </div>
 
     <script src="/vendor/xterm/lib/xterm.js"></script>

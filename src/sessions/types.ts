@@ -1,5 +1,7 @@
 export type SessionAuthMode = "m2m" | "user";
 
+export type SessionAgentType = string; // e.g. "claude-code", "codex", undefined for plain terminal
+
 export type SessionInfo = {
   sessionId: string;
   createdAt: number;
@@ -8,6 +10,7 @@ export type SessionInfo = {
   rows: number;
   authMode: SessionAuthMode;
   attachedClients: number;
+  agent?: SessionAgentType;
 };
 
 export type SessionExit = {
@@ -25,6 +28,8 @@ export type CreateSessionInput = {
   databricksHost?: string;
   userAccessTokenHeader?: string;
   env?: Record<string, string | undefined>;
+  agent?: SessionAgentType;
+  model?: string;
 };
 
 export type SetSessionAuthModeInput = {

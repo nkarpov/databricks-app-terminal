@@ -176,3 +176,96 @@ body {
   height: 100%;
   padding: 4px;
 }
+
+/* Agent badge in tab */
+.tab-agent {
+  border: 1px solid var(--border);
+  background: #101620;
+  color: var(--muted);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  line-height: 1;
+  padding: 0.14rem 0.38rem;
+  text-transform: lowercase;
+  flex: 0 0 auto;
+}
+
+.tab-agent.claude-code {
+  color: #d4a574;
+  border-color: #5c3d2e;
+}
+
+.tab-agent.codex {
+  color: #74d4a0;
+  border-color: #2e5c3d;
+}
+
+/* Session picker overlay */
+.setup-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  z-index: 10;
+}
+
+.setup-screen h2 {
+  font-size: 1.3rem;
+  font-weight: 500;
+  margin: 0 0 1.5rem 0;
+  color: var(--fg);
+}
+
+.options {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.opt-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.2rem 1.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  cursor: pointer;
+  min-width: 160px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.opt-btn:hover {
+  border-color: var(--accent);
+  background: #17253d;
+}
+
+.opt-name {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.opt-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.back-link {
+  margin-top: 1.2rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.back-link:hover {
+  color: var(--fg);
+}

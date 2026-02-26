@@ -42,6 +42,36 @@ Optional per-session user mode:
 
 This keeps M2M as the safe default while allowing explicit user-delegated CLI sessions.
 
+## Coding agent sessions
+
+The terminal supports embedded coding agent sessions (Claude Code, Codex) alongside plain terminals.
+
+- Click `+` to open the session picker — choose Terminal, Claude Code, or Codex
+- Agent CLIs are installed as optional dependencies and configured via `scripts/agent-setup.sh`
+- Agent sessions run inside the same PTY infrastructure as plain terminals
+- LLM API calls route through Databricks Model Serving (M2M auth), so agents work without external API keys
+
+### Auth mode switching in agent sessions
+
+Per-tab auth toggling works for agent sessions, not just plain terminals. When you toggle the auth badge on an agent tab, the agent's next tool-call command (e.g. `databricks clusters list`) runs with the new credentials.
+
+How it works:
+
+- A **shim** intercepts `databricks` CLI invocations — it sources the auth hook to sync credentials from the per-session state file, then `exec`s the real binary
+- The shim is placed first on `PATH` so it's transparent to agents
+- `BASH_ENV` and `~/.bash_profile` / `~/.bashrc` are also configured as fallback vectors for login and interactive subshells
+- Agent LLM API calls are unaffected — the agent binary keeps its M2M credentials regardless of the auth toggle
+
+### Agent setup
+
+For agent sessions to work, `scripts/agent-setup.sh` must run before the app starts. The default `app.yaml` handles this:
+
+```yaml
+command: ["bash", "-c", "source scripts/agent-setup.sh && npm run build && npm run start"]
+```
+
+The setup script writes Databricks CLI config, Claude Code settings (model routing, permissions), and Codex config (model catalog, proxy endpoint).
+
 ## Deploy
 
 `app.yaml` and `databricks.yml` are included.
@@ -66,7 +96,7 @@ databricks apps deploy --profile SHARED
 
 ### Sessions
 - `GET /api/sessions`
-- `POST /api/sessions` (optional body: `{ cwd?, cols?, rows?, authMode?: "m2m" | "user" }`)
+- `POST /api/sessions` (optional body: `{ cwd?, cols?, rows?, authMode?: "m2m" | "user", agent?: "claude-code" | "codex", model?: string }`)
 - `POST /api/sessions/:sessionId/attach`
 - `POST /api/sessions/:sessionId/input`
 - `POST /api/sessions/:sessionId/resize`

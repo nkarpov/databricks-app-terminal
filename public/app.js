@@ -2,9 +2,30 @@
   const tabsEl = document.getElementById("tabs");
   const terminalMainEl = document.getElementById("terminal-main");
   const createBtn = document.getElementById("create-session");
+  const sessionPicker = document.getElementById("session-picker");
+  const sessionTypeOptions = document.getElementById("session-type-options");
+  const modelPicker = document.getElementById("model-picker");
+  const pickerBack = document.getElementById("picker-back");
 
   const sessions = new Map();
   let activeSessionId = null;
+
+  const AGENT_MODELS = {
+    "claude-code": [
+      { id: "databricks-claude-opus-4-6", name: "Claude Opus 4.6", desc: "Most capable" },
+      { id: "databricks-claude-sonnet-4-6", name: "Claude Sonnet 4.6", desc: "Balanced" },
+      { id: "databricks-claude-haiku-4-5", name: "Claude Haiku 4.5", desc: "Fastest" },
+    ],
+    codex: [
+      { id: "databricks-gpt-5-3-codex", name: "GPT 5.3 Codex", desc: "Latest" },
+      { id: "databricks-gpt-5-2", name: "GPT 5.2", desc: "Stable" },
+    ],
+  };
+
+  const AGENT_LABELS = {
+    "claude-code": "Claude",
+    codex: "Codex",
+  };
 
   function api(method, url, body) {
     return fetch(url, {
@@ -47,10 +68,16 @@
     return sessionId.slice(0, 8);
   }
 
+  function agentTabLabel(agent) {
+    if (!agent) return null;
+    return AGENT_LABELS[agent] || agent;
+  }
+
   function displayTitle(session) {
-    return session.dynamicTitle && session.dynamicTitle.trim().length > 0
-      ? session.dynamicTitle.trim()
-      : shortSessionLabel(session.sessionId);
+    if (session.dynamicTitle && session.dynamicTitle.trim().length > 0) {
+      return session.dynamicTitle.trim();
+    }
+    return agentTabLabel(session.agent, session.sessionId) || shortSessionLabel(session.sessionId);
   }
 
   function updateTabTitle(session) {
@@ -141,7 +168,7 @@
     }
 
     if (sessions.size === 0) {
-      createSession();
+      showSessionPicker();
     }
   }
 
@@ -249,7 +276,7 @@
       });
   }
 
-  function mountSession(sessionId, authMode = "m2m", activate = true) {
+  function mountSession(sessionId, authMode = "m2m", activate = true, agent = undefined) {
     if (sessions.has(sessionId)) {
       if (activate) {
         activateSession(sessionId);
@@ -264,12 +291,18 @@
     closeEl.className = "tab-close";
     closeEl.type = "button";
     closeEl.setAttribute("aria-label", `Close ${sessionId}`);
-    closeEl.textContent = "×";
+    closeEl.textContent = "\u00d7";
 
     const authEl = document.createElement("button");
     authEl.className = "tab-auth";
     authEl.type = "button";
     authEl.setAttribute("aria-label", `Toggle auth mode for ${sessionId}`);
+
+    const agentEl = document.createElement("span");
+    if (agent) {
+      agentEl.className = `tab-agent ${agent}`;
+      agentEl.textContent = AGENT_LABELS[agent] || agent;
+    }
 
     const labelEl = document.createElement("span");
     labelEl.className = "tab-label";
@@ -278,6 +311,9 @@
     statusEl.className = "tab-status disconnected";
 
     tabEl.appendChild(closeEl);
+    if (agent) {
+      tabEl.appendChild(agentEl);
+    }
     tabEl.appendChild(authEl);
     tabEl.appendChild(labelEl);
     tabEl.appendChild(statusEl);
@@ -309,6 +345,7 @@
       tabEl,
       closeEl,
       authEl,
+      agentEl,
       labelEl,
       paneEl,
       statusEl,
@@ -318,6 +355,7 @@
       status: "disconnected",
       authMode: normalizeAuthMode(authMode),
       dynamicTitle: "",
+      agent: agent || null,
     };
 
     sessions.set(sessionId, state);
@@ -365,10 +403,76 @@
     }
   }
 
-  function createSession() {
-    api("POST", "/api/sessions", {})
+  // --- Session picker ---
+
+  function showSessionPicker() {
+    sessionPicker.style.display = "flex";
+    sessionTypeOptions.style.display = "flex";
+    modelPicker.style.display = "none";
+    pickerBack.style.display = "none";
+  }
+
+  function hideSessionPicker() {
+    sessionPicker.style.display = "none";
+  }
+
+  function showModelPicker(agentType) {
+    const models = AGENT_MODELS[agentType];
+    if (!models) return;
+
+    sessionTypeOptions.style.display = "none";
+    modelPicker.innerHTML = "";
+    modelPicker.style.display = "flex";
+    pickerBack.style.display = "inline-block";
+
+    for (const m of models) {
+      const btn = document.createElement("button");
+      btn.className = "opt-btn";
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "opt-name";
+      nameSpan.textContent = m.name;
+      const descSpan = document.createElement("span");
+      descSpan.className = "opt-desc";
+      descSpan.textContent = m.desc;
+      btn.appendChild(nameSpan);
+      btn.appendChild(descSpan);
+      btn.addEventListener("click", () => {
+        hideSessionPicker();
+        createSession(agentType, m.id);
+      });
+      modelPicker.appendChild(btn);
+    }
+  }
+
+  // Session type selection
+  for (const btn of sessionTypeOptions.querySelectorAll(".opt-btn")) {
+    btn.addEventListener("click", () => {
+      const type = btn.getAttribute("data-type");
+      if (type === "terminal") {
+        hideSessionPicker();
+        createSession();
+      } else {
+        showModelPicker(type);
+      }
+    });
+  }
+
+  pickerBack.addEventListener("click", () => {
+    sessionTypeOptions.style.display = "flex";
+    modelPicker.style.display = "none";
+    pickerBack.style.display = "none";
+  });
+
+  function createSession(agent, model) {
+    const body = {};
+    if (agent) body.agent = agent;
+    if (model) body.model = model;
+
+    api("POST", "/api/sessions", body)
       .then((data) => {
-        mountSession(data.session.sessionId, data.authMode || data.session.authMode || "m2m", true);
+        hideSessionPicker();
+        const s = data.session;
+        mountSession(s.sessionId, data.authMode || s.authMode || "m2m", true, s.agent);
       })
       .catch((error) => {
         console.warn("Create session failed:", error.message);
@@ -379,7 +483,7 @@
     api("GET", "/api/sessions")
       .then((data) => {
         for (const session of data.sessions) {
-          mountSession(session.sessionId, session.authMode || "m2m", false);
+          mountSession(session.sessionId, session.authMode || "m2m", false, session.agent);
         }
 
         if (sessions.size > 0) {
@@ -390,7 +494,7 @@
           return;
         }
 
-        createSession();
+        showSessionPicker();
       })
       .catch((error) => {
         console.warn("Loading sessions failed:", error.message);
@@ -406,7 +510,7 @@
     }
 
     event.preventDefault();
-    createSession();
+    showSessionPicker();
   }
 
   window.addEventListener("resize", () => {
@@ -423,7 +527,7 @@
   });
 
   window.addEventListener("keydown", handleNewTabShortcut);
-  createBtn.addEventListener("click", createSession);
+  createBtn.addEventListener("click", () => showSessionPicker());
 
   if (typeof ResizeObserver !== "undefined") {
     const resizeObserver = new ResizeObserver(() => {

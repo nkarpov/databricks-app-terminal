@@ -1,1 +1,1 @@
-command: ["npm", "run", "start"]
+command: ["bash", "-c", "source scripts/agent-setup.sh && npm run build && npm run start"]

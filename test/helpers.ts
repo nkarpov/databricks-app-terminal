@@ -51,6 +51,7 @@ export class FakeSessionManager implements SessionManager {
       rows: input.rows || 30,
       authMode: input.authMode || "m2m",
       attachedClients: 0,
+      agent: input.agent,
     };
 
     this.sessions.set(input.sessionId, {

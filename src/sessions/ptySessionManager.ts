@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import pty, { type IPty } from "node-pty";
 import { AppError } from "../api/types.js";
@@ -55,6 +56,7 @@ export type InMemoryPtySessionManagerOptions = {
   maxRows: number;
   authStateDir: string;
   bashRcFilePath?: string;
+  bashAuthHookPath?: string;
   logger: Logger;
 };
 
@@ -193,6 +195,8 @@ export class InMemoryPtySessionManager implements SessionManager {
 
   private readonly bashRcFilePath?: string;
 
+  private readonly bashAuthHookPath?: string;
+
   private readonly logger: Logger;
 
   constructor(options: InMemoryPtySessionManagerOptions) {
@@ -207,6 +211,7 @@ export class InMemoryPtySessionManager implements SessionManager {
     this.maxRows = options.maxRows;
     this.authStateDir = options.authStateDir;
     this.bashRcFilePath = options.bashRcFilePath;
+    this.bashAuthHookPath = options.bashAuthHookPath;
     this.logger = options.logger;
   }
 
@@ -263,12 +268,27 @@ export class InMemoryPtySessionManager implements SessionManager {
     applyAuthModeToEnv(mergedEnv, auth);
     mergedEnv.DBX_APP_TERMINAL_AUTH_STATE_FILE = auth.stateFilePath;
 
+    // For agent sessions, set BASH_ENV so non-interactive bash subprocesses
+    // (e.g. Claude Code's tool calls) source the auth hook at startup.
+    // The DEBUG trap in the hook then fires before each command, dynamically
+    // applying the current auth mode from the per-session state file.
+    if (input.agent && this.bashAuthHookPath) {
+      mergedEnv.BASH_ENV = this.bashAuthHookPath;
+    }
+
+    // Agent-specific env overrides must be applied AFTER applyAuthModeToEnv,
+    // which sets DATABRICKS_AUTH_TYPE based on the session auth mode.
+    // Codex needs DATABRICKS_AUTH_TYPE=pat and DATABRICKS_TOKEN from the bearer token file.
+    this.applyAgentEnvOverrides(mergedEnv, input.agent);
+
     await this.persistAuthState(auth);
+
+    const { command, args } = this.resolveSessionCommand(input.agent, mergedEnv);
 
     let p: IPty;
 
     try {
-      p = pty.spawn(this.shell, this.resolveShellArgs(), {
+      p = pty.spawn(command, args, {
         name: "xterm-256color",
         cols,
         rows,
@@ -280,6 +300,7 @@ export class InMemoryPtySessionManager implements SessionManager {
       throw new AppError(500, "SESSION_SPAWN_FAILED", "Failed to spawn PTY session", true, {
         sessionId: input.sessionId,
         shell: this.shell,
+        agent: input.agent,
         cause: error instanceof Error ? error.message : String(error),
       });
     }
@@ -292,6 +313,7 @@ export class InMemoryPtySessionManager implements SessionManager {
       rows,
       authMode,
       attachedClients: 0,
+      agent: input.agent,
     };
 
     const record: SessionRecord = {
@@ -332,6 +354,7 @@ export class InMemoryPtySessionManager implements SessionManager {
       cols,
       rows,
       authMode,
+      agent: input.agent,
       hasCachedUserToken: Boolean(record.auth.userAccessToken),
     });
 
@@ -498,6 +521,65 @@ export class InMemoryPtySessionManager implements SessionManager {
         // ignore shutdown race
       }
     }
+  }
+
+  private applyAgentEnvOverrides(env: Record<string, string>, agent?: string): void {
+    if (!agent) return;
+
+    if (agent === "codex") {
+      // Codex uses DATABRICKS_TOKEN for proxy auth via PAT.
+      // Read the bearer token from the file written by agent-setup.sh.
+      // Remove OAuth M2M vars so the CLI uses PAT exclusively.
+      const tokenPath = path.join(process.env.HOME || "/home/app", ".dbx_bearer_token");
+      try {
+        const token = fsSync.readFileSync(tokenPath, "utf-8").trim();
+        if (token) {
+          env.DATABRICKS_TOKEN = token;
+        }
+      } catch {
+        // Token file not found — agent-setup.sh may not have run
+      }
+
+      env.DATABRICKS_AUTH_TYPE = "pat";
+      delete env.DATABRICKS_CLIENT_ID;
+      delete env.DATABRICKS_CLIENT_SECRET;
+    }
+  }
+
+  private resolveSessionCommand(agent?: string, sessionEnv?: Record<string, string>): { command: string; args: string[]; skipRcFile: boolean } {
+    if (!agent) {
+      return {
+        command: this.shell,
+        args: this.resolveShellArgs(),
+        skipRcFile: false,
+      };
+    }
+
+    const agentCommands: Record<string, { bin: string; defaultArgs: string[] }> = {
+      "claude-code": { bin: "claude", defaultArgs: [] },
+      "codex": { bin: "codex", defaultArgs: ["--full-auto"] },
+    };
+
+    const config = agentCommands[agent];
+    if (!config) {
+      return {
+        command: this.shell,
+        args: this.resolveShellArgs(),
+        skipRcFile: false,
+      };
+    }
+
+    const cmd = [config.bin, ...config.defaultArgs].join(" ");
+    // Inject the session's PATH directly into the command so it survives
+    // bash --login profile scripts that may reset PATH. Use the session env
+    // PATH (which includes shims and runtime bins) rather than process.env.PATH.
+    const nodePath = sessionEnv?.PATH || process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
+    const checkAndRun = `export PATH="${nodePath}"; command -v ${config.bin} >/dev/null 2>&1 || { echo -e "\\n\\033[31m[error] '${config.bin}' not found on PATH. Run scripts/agent-setup.sh first.\\033[0m\\n"; }; ${cmd}; exec /bin/bash -i`;
+    return {
+      command: "/bin/bash",
+      args: ["--login", "-c", checkAndRun],
+      skipRcFile: true,
+    };
   }
 
   private resolveShellArgs(): string[] {

@@ -11,6 +11,7 @@ import { ServiceRegistry } from "./services/registry.js";
 type RuntimeToolingPaths = {
   runtimeRoot: string;
   runtimeBinDir: string;
+  shimsDir: string;
   authStateDir: string;
   bashAuthHookPath: string;
   bashRcPath: string;
@@ -70,7 +71,7 @@ else
     exit 2
   fi
 
-  response="$(request -X POST -H 'content-type: application/json' --data "{\"mode\":\"\${mode}\"}" "$base_url")"
+  response="$(request -X POST -H 'content-type: application/json' --data '{"mode":"'"$mode"'"}' "$base_url")"
 fi
 
 status="\${response##*$'\\n'}"
@@ -212,24 +213,92 @@ fi
 `;
 }
 
+function buildAuthShimScript(): string {
+  return `#!/usr/bin/env bash
+# Auth-switching shim: syncs credentials from the per-session state file
+# before delegating to the real binary. Agent tool-call subprocesses don't
+# inherit BASH_ENV or DEBUG traps, so this shim ensures every invocation
+# of shimmed commands picks up the current auth mode.
+
+if [ -n "\${DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH:-}" ] && [ -f "$DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH" ]; then
+  . "$DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH" 2>/dev/null
+fi
+
+# Find the real binary by searching PATH, skipping this shim's directory
+__shim_dir="$(cd "$(dirname "$0")" && pwd)"
+__cmd="$(basename "$0")"
+IFS=: read -ra __dirs <<< "$PATH"
+for __d in "\${__dirs[@]}"; do
+  [ "$__d" = "$__shim_dir" ] && continue
+  if [ -x "$__d/$__cmd" ]; then
+    exec "$__d/$__cmd" "$@"
+  fi
+done
+echo "$__cmd: command not found" >&2
+exit 127
+`;
+}
+
 async function prepareRuntimeTooling(toolsRoot: string): Promise<RuntimeToolingPaths> {
   const runtimeRoot = path.join(toolsRoot, "runtime");
   const runtimeBinDir = path.join(runtimeRoot, "bin");
+  const shimsDir = path.join(runtimeRoot, "shims");
   const authStateDir = path.join(runtimeRoot, "auth-state");
   const bashAuthHookPath = path.join(runtimeRoot, "bash-auth-hook.sh");
   const bashRcPath = path.join(runtimeRoot, "bashrc");
   const dbxAuthPath = path.join(runtimeBinDir, "dbx-auth");
 
   await fs.mkdir(runtimeBinDir, { recursive: true });
+  await fs.mkdir(shimsDir, { recursive: true });
   await fs.mkdir(authStateDir, { recursive: true });
 
   await writeFileWithMode(dbxAuthPath, buildDbxAuthScript(), 0o755);
   await writeFileWithMode(bashAuthHookPath, buildBashAuthHookScript(), 0o644);
   await writeFileWithMode(bashRcPath, buildBashRcScript(), 0o644);
 
+  // Write auth-switching shims for commands that need dynamic credentials.
+  // Agent subprocesses don't inherit BASH_ENV or DEBUG traps, so these shims
+  // source the auth hook and then exec the real binary.
+  const shimScript = buildAuthShimScript();
+  await writeFileWithMode(path.join(shimsDir, "databricks"), shimScript, 0o755);
+
+  // Write ~/.bash_profile and ~/.bashrc so agent subprocesses (login shells,
+  // interactive shells) source the auth hook. This covers Codex's `bash -lc`
+  // tool calls and any interactive bash subshells.
+  const homeDir = process.env.HOME || "/home/app";
+  const bashProfilePath = path.join(homeDir, ".bash_profile");
+  const bashrcPath = path.join(homeDir, ".bashrc");
+
+  const profileContent = `# Written by databricks-app-terminal at startup
+[ -n "\${DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH:-}" ] && \\
+  [ -f "$DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH" ] && \\
+  . "$DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH" 2>/dev/null
+[ -f ~/.bashrc ] && . ~/.bashrc
+`;
+
+  const bashrcSnippet = `\n# Written by databricks-app-terminal at startup
+[ -n "\${DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH:-}" ] && \\
+  [ -f "$DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH" ] && \\
+  . "$DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH" 2>/dev/null
+`;
+
+  await writeFileWithMode(bashProfilePath, profileContent, 0o644);
+
+  // Append to ~/.bashrc rather than overwriting — it may already exist
+  try {
+    const existingBashrc = await fs.readFile(bashrcPath, "utf-8");
+    if (!existingBashrc.includes("DBX_APP_TERMINAL_BASH_AUTH_HOOK_PATH")) {
+      await fs.appendFile(bashrcPath, bashrcSnippet);
+    }
+  } catch {
+    // File doesn't exist, write it fresh
+    await writeFileWithMode(bashrcPath, bashrcSnippet.trimStart(), 0o644);
+  }
+
   return {
     runtimeRoot,
     runtimeBinDir,
+    shimsDir,
     authStateDir,
     bashAuthHookPath,
     bashRcPath,
@@ -265,7 +334,7 @@ async function main(): Promise<void> {
 
   const npmGlobalBin = path.join(config.npmGlobalPrefix, "bin");
   const existingPath = process.env.PATH || "";
-  const prefixedPath = prependPathEntries(existingPath, [tooling.runtimeBinDir, npmGlobalBin]);
+  const prefixedPath = prependPathEntries(existingPath, [tooling.shimsDir, tooling.runtimeBinDir, npmGlobalBin]);
 
   const sessions = new InMemoryPtySessionManager({
     shell: config.shell,
@@ -289,6 +358,7 @@ async function main(): Promise<void> {
     maxRows: config.maxRows,
     authStateDir: tooling.authStateDir,
     bashRcFilePath: tooling.bashRcPath,
+    bashAuthHookPath: tooling.bashAuthHookPath,
     logger,
   });
 

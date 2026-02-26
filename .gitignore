@@ -8,3 +8,4 @@ logs
 .dbx-app-terminal-tools
 *.log
 .DS_Store
+images/

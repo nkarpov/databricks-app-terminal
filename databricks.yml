@@ -5,9 +5,13 @@ resources:
   apps:
     app:
       name: databricks-app-terminal
-      description: "Databricks App Terminal: multi-session web terminal"
+      description: "Databricks App Terminal: multi-session web terminal with coding agent support"
       source_code_path: ./
 
 targets:
   default:
     default: true
+  sandbox:
+    workspace:
+      host: https://dbc-8b4786c2-7611.cloud.databricks.com
+      profile: sandbox

@@ -24,6 +24,8 @@ const createSessionBodySchema = z
     cols: z.number().int().positive().optional(),
     rows: z.number().int().positive().optional(),
     authMode: z.enum(["m2m", "user", "user-token"]).optional(),
+    agent: z.string().min(1).max(50).optional(),
+    model: z.string().min(1).max(100).optional(),
   })
   .default({});
 
@@ -272,6 +274,8 @@ export function createApp(services: AppServices): express.Express {
         sessionId,
         actor,
         cwd: sessionCwd,
+        agent: payload.agent,
+        model: payload.model,
       });
 
       const session = await services.sessions.createSession({
@@ -283,6 +287,8 @@ export function createApp(services: AppServices): express.Express {
         userAccessToken: auth.cachedUserAccessToken,
         databricksHost: services.config.databricksHost,
         userAccessTokenHeader: services.config.userAccessTokenHeader,
+        agent: payload.agent,
+        model: payload.model,
         env: {
           DBX_APP_TERMINAL_SESSION_ID: sessionId,
           DBX_APP_TERMINAL_ACTOR: actor,
