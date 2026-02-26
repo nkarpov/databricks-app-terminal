@@ -6,6 +6,23 @@ __dbx_terminal_type_cmd="${DBX_APP_TERMINAL_CLAUDE_CMD:-claude}"
 __dbx_terminal_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 __dbx_terminal_shared_dir="${__dbx_terminal_root}/terminal-types/_shared"
 
+dbx_claude_update_settings_token() {
+  local new_token="$1"
+  local settings_file="${HOME}/.claude/settings.json"
+  if [[ -f "$settings_file" ]]; then
+    python3 - "$new_token" "$settings_file" << 'PYEOF'
+import json, sys
+token, path = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    s = json.load(f)
+if s.get('env', {}).get('ANTHROPIC_AUTH_TOKEN'):
+    s['env']['ANTHROPIC_AUTH_TOKEN'] = token
+    with open(path, 'w') as f:
+        json.dump(s, f, indent=2)
+PYEOF
+  fi
+}
+
 dbx_claude_write_settings() {
   local host_url="$1"
   local token="$2"
@@ -85,6 +102,8 @@ fi
 
 dbx_agent_write_token_file "${__dbx_bearer_token}"
 dbx_claude_write_settings "${__dbx_host_url}" "${__dbx_bearer_token}" "$(pwd)"
+
+dbx_agent_start_token_refresh "${__dbx_terminal_shared_dir}" "${DBX_APP_TERMINAL_TOKEN_REFRESH_INTERVAL:-2700}" "dbx_claude_update_settings_token"
 
 if [[ "${DBX_APP_TERMINAL_TYPE_NO_AUTO_EXEC:-0}" != "1" ]] && command -v "$__dbx_terminal_type_cmd" >/dev/null 2>&1; then
   if [[ -n "${DBX_APP_TERMINAL_CLAUDE_MODEL:-}" ]]; then

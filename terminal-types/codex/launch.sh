@@ -134,8 +134,8 @@ fi
 dbx_agent_write_token_file "${__dbx_bearer_token}"
 dbx_codex_write_config "${__dbx_host_url}" "${__dbx_codex_model}"
 export DATABRICKS_TOKEN="${__dbx_bearer_token}"
-export DATABRICKS_AUTH_TYPE="pat"
-unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET
+
+dbx_agent_start_token_refresh "${__dbx_terminal_shared_dir}" "${DBX_APP_TERMINAL_TOKEN_REFRESH_INTERVAL:-2700}"
 
 __dbx_codex_launched=0
 if [[ "${DBX_APP_TERMINAL_TYPE_NO_AUTO_EXEC:-0}" != "1" ]] && command -v "$__dbx_terminal_type_cmd" >/dev/null 2>&1; then
