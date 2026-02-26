@@ -45,13 +45,15 @@ Fields:
 - If it returns without `exec`, the user stays in a regular shell.
 - Session auth mode (`m2m` / `user`) and Databricks auth env handling are already provided by core runtime.
 - Shared helpers for Databricks-backed agents live in `terminal-types/_shared/agent-bootstrap.sh` and `terminal-types/_shared/get-token.sh`.
+- Keep provider-specific setup in the type's own `launch.sh` for true drop-in extensions.
 
 ## Databricks-backed agent launchers
 
 The built-in `claude` and `codex` terminal types source shared helper logic from `terminal-types/_shared/`.
 
-- `agent-bootstrap.sh` writes `.databrickscfg`, exchanges OAuth token, and generates CLI config files.
+- `agent-bootstrap.sh` provides generic bootstrap primitives (host normalization, OAuth checks, `.databrickscfg`, token exchange/cache).
 - `get-token.sh` performs service-principal OAuth token exchange (with `DATABRICKS_TOKEN` fallback).
+- Provider-specific CLI config generation lives inside each type's own `launch.sh`.
 
 Launcher env knobs:
 

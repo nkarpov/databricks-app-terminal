@@ -7,6 +7,101 @@ __dbx_terminal_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 __dbx_terminal_shared_dir="${__dbx_terminal_root}/terminal-types/_shared"
 __dbx_codex_model="${DBX_APP_TERMINAL_CODEX_MODEL:-databricks-gpt-5-3-codex}"
 
+dbx_codex_write_config() {
+  local host_url="$1"
+  local default_model="$2"
+
+  mkdir -p "${HOME}/.codex"
+
+  cat > "${HOME}/.codex/config.toml" << CODEXCFG
+profile = "default"
+# Databricks OpenAI proxy currently rejects web_search tool calls.
+web_search = "disabled"
+
+[profiles.default]
+model_provider = "proxy"
+model = "${default_model}"
+model_catalog_json = "${HOME}/.codex/databricks-models.json"
+
+[model_providers.proxy]
+name = "Databricks Proxy"
+base_url = "${host_url}/serving-endpoints"
+env_key = "DATABRICKS_TOKEN"
+wire_api = "responses"
+CODEXCFG
+
+  cat > "${HOME}/.codex/databricks-models.json" << 'MODELS'
+{
+  "models": [
+    {
+      "slug": "databricks-gpt-5-3-codex",
+      "display_name": "databricks-gpt-5-3-codex",
+      "description": "GPT-5.3 Codex via Databricks Model Serving",
+      "context_window": 272000,
+      "supported_in_api": true,
+      "priority": 0,
+      "available_in_plans": ["enterprise"],
+      "supports_reasoning_summaries": true,
+      "support_verbosity": true,
+      "default_verbosity": "low",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {"effort": "low", "description": "Fast responses with lighter reasoning"},
+        {"effort": "medium", "description": "Balances speed and reasoning depth"},
+        {"effort": "high", "description": "Greater reasoning depth for complex problems"},
+        {"effort": "xhigh", "description": "Maximum reasoning depth"}
+      ],
+      "input_modalities": ["text", "image"],
+      "supports_parallel_tool_calls": true,
+      "prefer_websockets": false,
+      "apply_patch_tool_type": "freeform",
+      "truncation_policy": {"mode": "tokens", "limit": 10000},
+      "reasoning_summary_format": "experimental",
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "minimal_client_version": "0.98.0",
+      "upgrade": null,
+      "base_instructions": "",
+      "model_messages": null,
+      "experimental_supported_tools": []
+    },
+    {
+      "slug": "databricks-gpt-5-2",
+      "display_name": "databricks-gpt-5-2",
+      "description": "GPT-5.2 via Databricks Model Serving",
+      "context_window": 272000,
+      "supported_in_api": true,
+      "priority": 1,
+      "available_in_plans": ["enterprise"],
+      "supports_reasoning_summaries": true,
+      "support_verbosity": true,
+      "default_verbosity": "low",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {"effort": "low", "description": "Fast responses with lighter reasoning"},
+        {"effort": "medium", "description": "Balances speed and reasoning depth"},
+        {"effort": "high", "description": "Greater reasoning depth for complex problems"},
+        {"effort": "xhigh", "description": "Maximum reasoning depth"}
+      ],
+      "input_modalities": ["text", "image"],
+      "supports_parallel_tool_calls": true,
+      "prefer_websockets": false,
+      "apply_patch_tool_type": "freeform",
+      "truncation_policy": {"mode": "tokens", "limit": 10000},
+      "reasoning_summary_format": "experimental",
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "minimal_client_version": "0.98.0",
+      "upgrade": null,
+      "base_instructions": "",
+      "model_messages": null,
+      "experimental_supported_tools": []
+    }
+  ]
+}
+MODELS
+}
+
 # shellcheck source=../_shared/agent-bootstrap.sh
 source "${__dbx_terminal_shared_dir}/agent-bootstrap.sh"
 
@@ -37,7 +132,7 @@ if [[ -z "${__dbx_bearer_token}" ]]; then
 fi
 
 dbx_agent_write_token_file "${__dbx_bearer_token}"
-dbx_agent_write_codex_config "${__dbx_host_url}" "${__dbx_codex_model}"
+dbx_codex_write_config "${__dbx_host_url}" "${__dbx_codex_model}"
 export DATABRICKS_TOKEN="${__dbx_bearer_token}"
 export DATABRICKS_AUTH_TYPE="pat"
 unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET

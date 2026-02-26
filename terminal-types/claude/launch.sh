@@ -6,6 +6,54 @@ __dbx_terminal_type_cmd="${DBX_APP_TERMINAL_CLAUDE_CMD:-claude}"
 __dbx_terminal_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 __dbx_terminal_shared_dir="${__dbx_terminal_root}/terminal-types/_shared"
 
+dbx_claude_write_settings() {
+  local host_url="$1"
+  local token="$2"
+  local project_dir="$3"
+
+  mkdir -p "${HOME}/.claude"
+
+  cat > "${HOME}/.claude/settings.json" << SETTINGS
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "${host_url}/serving-endpoints/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "${token}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "databricks-claude-opus-4-6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "databricks-claude-sonnet-4-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "databricks-claude-haiku-4-5",
+    "ANTHROPIC_CUSTOM_HEADERS": "x-databricks-use-coding-agent-mode: true",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "deny": []
+  }
+}
+SETTINGS
+  chmod 600 "${HOME}/.claude/settings.json"
+
+  cat > "${HOME}/.claude.json" << CLSTATE
+{
+  "hasCompletedOnboarding": true,
+  "projects": {
+    "${project_dir}": {
+      "allowedTools": [],
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
+CLSTATE
+}
+
 # shellcheck source=../_shared/agent-bootstrap.sh
 source "${__dbx_terminal_shared_dir}/agent-bootstrap.sh"
 
@@ -36,7 +84,7 @@ if [[ -z "${__dbx_bearer_token}" ]]; then
 fi
 
 dbx_agent_write_token_file "${__dbx_bearer_token}"
-dbx_agent_write_claude_settings "${__dbx_host_url}" "${__dbx_bearer_token}" "$(pwd)"
+dbx_claude_write_settings "${__dbx_host_url}" "${__dbx_bearer_token}" "$(pwd)"
 
 if [[ "${DBX_APP_TERMINAL_TYPE_NO_AUTO_EXEC:-0}" != "1" ]] && command -v "$__dbx_terminal_type_cmd" >/dev/null 2>&1; then
   if [[ -n "${DBX_APP_TERMINAL_CLAUDE_MODEL:-}" ]]; then
