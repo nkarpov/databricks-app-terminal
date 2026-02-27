@@ -321,6 +321,7 @@ export function createSessionController({
       dynamicTitle: typeof options.dynamicTitle === "string" ? options.dynamicTitle : "",
       inlinePicker: null,
       isLauncher,
+      suppressControlInputOnce: false,
     };
 
     state.sessions.set(sessionId, stateEntry);
@@ -335,6 +336,15 @@ export function createSessionController({
     terminal.onData((data) => {
       if (stateEntry.inlinePicker) {
         return;
+      }
+
+      if (stateEntry.suppressControlInputOnce) {
+        stateEntry.suppressControlInputOnce = false;
+
+        // Enter usually arrives as CR/LF; drop it once after picker selection.
+        if (data.replace(/[\r\n]/g, "").length === 0) {
+          return;
+        }
       }
 
       if (!stateEntry.socket || stateEntry.socket.readyState !== WebSocket.OPEN) {

@@ -273,6 +273,10 @@ export function createLauncherController({ state, sessionTypesModel, textLayout,
     const currentTypeId = session.typeId;
     const launcher = isLauncherSession(session);
 
+    // Prevent the Enter key that confirms picker selection from leaking as input
+    // into the currently attached PTY session.
+    session.suppressControlInputOnce = true;
+
     closeInlineSessionTypePicker(session, !replaceOnSelect);
 
     const actions = requireSessionActions();
