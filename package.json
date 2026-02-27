@@ -23,8 +23,8 @@
     "zod": "^3.24.2"
   },
   "optionalDependencies": {
-    "@anthropic-ai/claude-code": "2.1.59",
-    "@openai/codex": "0.105.0"
+    "@anthropic-ai/claude-code": "latest",
+    "@openai/codex": "latest"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
