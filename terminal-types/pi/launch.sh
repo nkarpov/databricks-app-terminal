@@ -36,6 +36,39 @@ NODE
   fi
 }
 
+dbx_pi_fix_long_toolcall_ids() {
+  local responses_shared_js="${__dbx_terminal_root}/node_modules/@mariozechner/pi-ai/dist/providers/openai-responses-shared.js"
+  [[ -f "${responses_shared_js}" ]] || return 0
+
+  if grep -q 'if (itemId && itemId.length > 64)' "${responses_shared_js}"; then
+    return 0
+  fi
+
+  DBX_PI_RESPONSES_SHARED_JS="${responses_shared_js}" node <<'NODE'
+const fs = require("node:fs");
+
+const path = process.env.DBX_PI_RESPONSES_SHARED_JS;
+const before = `if (isDifferentModel && itemId?.startsWith("fc_")) {
+                        itemId = undefined;
+                    }`;
+const after = `${before}
+                    if (itemId && itemId.length > 64) {
+                        itemId = undefined;
+                    }`;
+
+let source = fs.readFileSync(path, "utf8");
+if (source.includes(after)) process.exit(0);
+if (!source.includes(before)) process.exit(3);
+source = source.replace(before, after);
+fs.writeFileSync(path, source);
+NODE
+
+  local patch_rc=$?
+  if [[ $patch_rc -ne 0 ]]; then
+    printf '[session-type:%s] warning: could not patch long tool-call ids for Responses API (rc=%s).\n' "$__dbx_terminal_type_name" "$patch_rc"
+  fi
+}
+
 dbx_pi_write_models_config() {
   local host_url="$1"
 
@@ -168,6 +201,7 @@ source "${__dbx_terminal_shared_dir}/agent-bootstrap.sh"
 dbx_agent_home
 dbx_agent_add_node_path "${__dbx_terminal_root}"
 dbx_pi_enable_databricks_xhigh
+dbx_pi_fix_long_toolcall_ids
 if ! dbx_agent_require_oauth_env; then
   printf '\n[session-type:%s] oauth env bootstrap failed. staying in shell.\n\n' "$__dbx_terminal_type_name"
   return 0
