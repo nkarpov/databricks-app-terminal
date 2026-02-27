@@ -49,7 +49,7 @@ Fields:
 
 ## Databricks-backed agent launchers
 
-The built-in `claude` and `codex` terminal types source shared helper logic from `terminal-types/_shared/`.
+The built-in `claude`, `codex`, and `pi` terminal types source shared helper logic from `terminal-types/_shared/`.
 
 - `agent-bootstrap.sh` provides generic bootstrap primitives (host normalization, OAuth checks, `.databrickscfg`, token exchange/cache).
 - `get-token.sh` performs service-principal OAuth token exchange (with `DATABRICKS_TOKEN` fallback).
@@ -59,5 +59,7 @@ Launcher env knobs:
 
 - `DBX_APP_TERMINAL_CLAUDE_CMD` (default `claude`)
 - `DBX_APP_TERMINAL_CODEX_CMD` (default `codex`)
+- `DBX_APP_TERMINAL_PI_CMD` (default `pi`)
 - `DBX_APP_TERMINAL_CLAUDE_MODEL` (optional Claude model override)
 - `DBX_APP_TERMINAL_CODEX_MODEL` (default `databricks-gpt-5-3-codex`)
+- `DBX_APP_TERMINAL_PI_FOOTER_EXTENSION` (optional path override; default `./extensions/top-footer-line/index.ts`)

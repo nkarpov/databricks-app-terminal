@@ -24,6 +24,7 @@
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-code": "latest",
+    "@mariozechner/pi-coding-agent": "latest",
     "@openai/codex": "latest"
   },
   "devDependencies": {
