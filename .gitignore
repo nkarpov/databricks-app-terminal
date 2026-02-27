@@ -7,4 +7,6 @@ logs
 .appagent-tools
 .dbx-app-terminal-tools
 *.log
+.env
+.env.local
 .DS_Store
