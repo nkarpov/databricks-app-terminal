@@ -7,12 +7,19 @@
   --muted: #90a0b7;
   --accent: #4f8cff;
   --danger: #ef5350;
+  --terminal-font-family: "DBX Term Icons", "Symbols Nerd Font Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 @font-face {
   font-family: "DBX Term Icons";
   src: url("/assets/terminal-icons/dbx-term-icons.woff2") format("woff2");
   font-display: block;
+}
+
+@font-face {
+  font-family: "Symbols Nerd Font Mono";
+  src: url("/fonts/SymbolsNerdFontMono-Regular.ttf") format("truetype");
+  font-display: swap;
 }
 
 * {

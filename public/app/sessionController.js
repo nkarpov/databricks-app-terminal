@@ -289,10 +289,14 @@ export function createSessionController({
     paneEl.appendChild(hostEl);
     terminalMainEl.appendChild(paneEl);
 
+    const terminalFontFamily =
+      getComputedStyle(document.documentElement).getPropertyValue("--terminal-font-family").trim()
+      || '"DBX Term Icons", "Symbols Nerd Font Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+
     const terminal = new TerminalCtor({
       cursorBlink: true,
       fontSize: 15,
-      fontFamily: '"DBX Term Icons", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+      fontFamily: terminalFontFamily,
       theme: {
         background: "#0b0d10",
       },
