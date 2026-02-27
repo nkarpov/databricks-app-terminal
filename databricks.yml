@@ -11,6 +11,12 @@ resources:
       name: databricks-app-terminal
       description: "Databricks App Terminal: multi-session web terminal"
       source_code_path: ./
+      resources:
+        - name: agent_state_volume
+          uc_securable:
+            securable_type: VOLUME
+            securable_full_name: appterminal.default.appterminal
+            permission: WRITE_VOLUME
 
 targets:
   default:

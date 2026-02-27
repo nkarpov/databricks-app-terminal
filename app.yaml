@@ -1,1 +1,4 @@
 command: ["npm", "run", "start"]
+env:
+  - name: AGENT_STATE_VOLUME
+    valueFrom: agent_state_volume

@@ -84,7 +84,9 @@ if [[ -z "${__dbx_bearer_token}" ]]; then
 fi
 
 dbx_agent_write_token_file "${__dbx_bearer_token}"
+dbx_agent_persist_restore_if_enabled
 dbx_claude_write_settings "${__dbx_host_url}" "${__dbx_bearer_token}" "$(pwd)"
+dbx_agent_persist_watch_if_enabled
 
 if [[ "${DBX_APP_TERMINAL_TYPE_NO_AUTO_EXEC:-0}" != "1" ]] && command -v "$__dbx_terminal_type_cmd" >/dev/null 2>&1; then
   if [[ -n "${DBX_APP_TERMINAL_CLAUDE_MODEL:-}" ]]; then

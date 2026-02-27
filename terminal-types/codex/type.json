@@ -4,5 +4,16 @@
   "description": "Launch Codex CLI in this session",
   "badge": "codex",
   "icon": "\uE002",
-  "entrypoint": "launch.sh"
+  "entrypoint": "launch.sh",
+  "persistence": {
+    "enabled": true,
+    "schemaVersion": 1,
+    "include": [
+      ".codex/**"
+    ],
+    "exclude": [
+      "**/*.tmp"
+    ],
+    "restoreStrategy": "overwrite"
+  }
 }

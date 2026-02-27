@@ -4,5 +4,17 @@
   "description": "Launch Claude Code CLI in this session",
   "badge": "claude",
   "icon": "\uE001",
-  "entrypoint": "launch.sh"
+  "entrypoint": "launch.sh",
+  "persistence": {
+    "enabled": true,
+    "schemaVersion": 1,
+    "include": [
+      ".claude/**",
+      ".claude.json"
+    ],
+    "exclude": [
+      "**/*.tmp"
+    ],
+    "restoreStrategy": "overwrite"
+  }
 }

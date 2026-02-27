@@ -300,6 +300,19 @@ export function createApp(services: AppServices): express.Express {
         typeId: sessionType.id,
       });
 
+      const persistenceEnv = sessionType.persistence?.enabled
+        ? {
+            DBX_APP_TERMINAL_PERSIST_ENABLED: "1",
+            DBX_APP_TERMINAL_PERSIST_SCHEMA_VERSION: String(sessionType.persistence.schemaVersion || 1),
+            DBX_APP_TERMINAL_PERSIST_INCLUDE: sessionType.persistence.include.join("\n"),
+            DBX_APP_TERMINAL_PERSIST_EXCLUDE: (sessionType.persistence.exclude || []).join("\n"),
+            DBX_APP_TERMINAL_PERSIST_RESTORE_STRATEGY: sessionType.persistence.restoreStrategy || "overwrite",
+            DBX_APP_TERMINAL_PERSIST_TYPE_ID: sessionType.id,
+          }
+        : {
+            DBX_APP_TERMINAL_PERSIST_ENABLED: "0",
+          };
+
       const session = await services.sessions.createSession({
         sessionId,
         cwd: sessionCwd,
@@ -315,6 +328,7 @@ export function createApp(services: AppServices): express.Express {
           DBX_APP_TERMINAL_SESSION_ID: sessionId,
           DBX_APP_TERMINAL_ACTOR: actor,
           DBX_APP_TERMINAL_TYPE_ID: sessionType.id,
+          ...persistenceEnv,
           ...env.env,
           ...auth.env,
         },

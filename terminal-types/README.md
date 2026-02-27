@@ -36,6 +36,12 @@ Fields:
 - `icon` (optional): short icon/logo string (e.g. unicode glyph) used in TUI picker and tab badge
   - can be a private-use glyph when backed by a bundled icon font
 - `entrypoint` (optional): launch script path relative to type folder, default `launch.sh`
+- `persistence` (optional): declarative agent-state sync contract used by shared bootstrap helpers
+  - `enabled` (bool)
+  - `schemaVersion` (int, currently `1`)
+  - `include` (array of glob patterns relative to `$HOME`)
+  - `exclude` (optional array of glob patterns)
+  - `restoreStrategy` (`overwrite` or `if-missing`)
 
 ## `launch.sh`
 
@@ -49,11 +55,16 @@ Fields:
 
 ## Databricks-backed agent launchers
 
-The built-in `claude` and `codex` terminal types source shared helper logic from `terminal-types/_shared/`.
+The built-in `claude`, `codex`, and `pi` terminal types source shared helper logic from `terminal-types/_shared/`.
 
 - `agent-bootstrap.sh` provides generic bootstrap primitives (host normalization, OAuth checks, `.databrickscfg`, token exchange/cache).
+- `agent-bootstrap.sh` also provides optional persistence helpers:
+  - `dbx_agent_persist_restore_if_enabled`
+  - `dbx_agent_persist_watch_if_enabled`
 - `get-token.sh` performs service-principal OAuth token exchange (with `DATABRICKS_TOKEN` fallback).
 - Provider-specific CLI config generation lives inside each type's own `launch.sh`.
+
+Persistence helpers expect `AGENT_STATE_VOLUME` to be set (for example via Databricks Apps `app.yaml` `env[].valueFrom`), and sync raw files + `manifest.txt` to `dbfs:${AGENT_STATE_VOLUME}/agent-state/<type-id>/`.
 
 Launcher env knobs:
 
