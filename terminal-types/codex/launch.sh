@@ -132,7 +132,9 @@ if [[ -z "${__dbx_bearer_token}" ]]; then
 fi
 
 dbx_agent_write_token_file "${__dbx_bearer_token}"
+dbx_agent_persist_restore_if_enabled
 dbx_codex_write_config "${__dbx_host_url}" "${__dbx_codex_model}"
+dbx_agent_persist_watch_if_enabled
 export DATABRICKS_TOKEN="${__dbx_bearer_token}"
 export DATABRICKS_AUTH_TYPE="pat"
 unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET

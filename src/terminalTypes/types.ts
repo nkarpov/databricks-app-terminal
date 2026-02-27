@@ -1,3 +1,11 @@
+export type TerminalTypePersistence = {
+  enabled: boolean;
+  schemaVersion: number;
+  include: string[];
+  exclude?: string[];
+  restoreStrategy?: "overwrite" | "if-missing";
+};
+
 export type TerminalType = {
   id: string;
   name: string;
@@ -6,6 +14,7 @@ export type TerminalType = {
   icon?: string;
   default: boolean;
   builtIn: boolean;
+  persistence?: TerminalTypePersistence;
 };
 
 export type ResolvedTerminalType = TerminalType & {

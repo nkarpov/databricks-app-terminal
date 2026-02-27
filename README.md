@@ -36,6 +36,7 @@ Session types are discovered dynamically from `terminal-types/*` at startup.
   - `terminal-types/<type-id>/type.json`
   - `terminal-types/<type-id>/launch.sh`
 - `type.json` can include optional `icon` (unicode/custom glyph string) for CLI-style picker display.
+- `type.json` can include optional `persistence` contract (`include`/`exclude` globs relative to `$HOME`) used by shared agent-state sync helpers.
 - Included profiles in this repo: `claude`, `codex`, `pi` (plus built-in `terminal`).
 - Bundled logo font assets live under `public/assets/terminal-icons` (source SVGs in `assets/terminal-icons/src`).
 - Type launch scripts run on top of the base terminal runtime/auth model.
@@ -61,6 +62,8 @@ This keeps M2M as the safe default while allowing explicit user-delegated CLI se
 ## Deploy
 
 `app.yaml` and `databricks.yml` are included.
+
+If you want terminal-type persistence helpers to sync agent state to UC Volumes, define an app env var via `valueFrom` in `app.yaml` (for example `AGENT_STATE_VOLUME` -> your volume resource key).
 
 ```bash
 npm run build

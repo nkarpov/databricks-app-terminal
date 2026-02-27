@@ -16,6 +16,14 @@ const BASE_TERMINAL_TYPE: ResolvedTerminalType = {
 
 const typeIdPattern = /^[a-z0-9][a-z0-9-_]{0,63}$/;
 
+const persistenceSchema = z.object({
+  enabled: z.boolean().default(true),
+  schemaVersion: z.number().int().positive().default(1),
+  include: z.array(z.string().min(1)).min(1),
+  exclude: z.array(z.string().min(1)).optional(),
+  restoreStrategy: z.enum(["overwrite", "if-missing"]).default("overwrite").optional(),
+});
+
 const terminalTypeManifestSchema = z.object({
   id: z.string().regex(typeIdPattern).optional(),
   name: z.string().min(1).max(80),
@@ -23,9 +31,24 @@ const terminalTypeManifestSchema = z.object({
   badge: z.string().min(1).max(24).optional(),
   icon: z.string().min(1).max(8).optional(),
   entrypoint: z.string().min(1).max(200).optional(),
+  persistence: persistenceSchema.optional(),
 });
 
 type TerminalTypeManifest = z.infer<typeof terminalTypeManifestSchema>;
+
+function clonePersistence(persistence: ResolvedTerminalType["persistence"]): ResolvedTerminalType["persistence"] {
+  if (!persistence) {
+    return undefined;
+  }
+
+  return {
+    enabled: persistence.enabled,
+    schemaVersion: persistence.schemaVersion,
+    include: [...persistence.include],
+    exclude: persistence.exclude ? [...persistence.exclude] : undefined,
+    restoreStrategy: persistence.restoreStrategy,
+  };
+}
 
 class InMemoryTerminalTypeRegistry implements TerminalTypeRegistry {
   constructor(
@@ -34,7 +57,10 @@ class InMemoryTerminalTypeRegistry implements TerminalTypeRegistry {
   ) {}
 
   listTypes(): TerminalType[] {
-    return this.types.map(({ entrypointPath: _entrypointPath, ...type }) => ({ ...type }));
+    return this.types.map(({ entrypointPath: _entrypointPath, ...type }) => ({
+      ...type,
+      persistence: clonePersistence(type.persistence),
+    }));
   }
 
   resolveType(id: string): ResolvedTerminalType | undefined {
@@ -43,7 +69,10 @@ class InMemoryTerminalTypeRegistry implements TerminalTypeRegistry {
       return undefined;
     }
 
-    return { ...resolved };
+    return {
+      ...resolved,
+      persistence: clonePersistence(resolved.persistence),
+    };
   }
 
   getDefaultType(): ResolvedTerminalType {
@@ -146,6 +175,15 @@ export async function loadTerminalTypeRegistry(
       icon: manifest.icon,
       builtIn: false,
       default: false,
+      persistence: manifest.persistence
+        ? {
+            enabled: manifest.persistence.enabled,
+            schemaVersion: manifest.persistence.schemaVersion,
+            include: [...manifest.persistence.include],
+            exclude: manifest.persistence.exclude ? [...manifest.persistence.exclude] : undefined,
+            restoreStrategy: manifest.persistence.restoreStrategy || "overwrite",
+          }
+        : undefined,
       entrypointPath,
     });
   }
