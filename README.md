@@ -144,6 +144,27 @@ npm install
 npm run dev
 ```
 
+## Experimental: PostgreSQL-backed filesystem probe
+
+A local spike script exists to evaluate PostgreSQL/Lakebase as a persistence backend:
+
+- script: `scripts/pgfs-probe.mjs`
+- command: `npm run pgfs:probe -- <push|pull|list|bench>`
+
+Use a **local environment variable** for secrets (do not commit credentials):
+
+```bash
+export PGFS_DATABASE_URL='postgresql://...'
+npm run pgfs:probe -- push
+```
+
+Optional env knobs:
+
+- `PGFS_LOCAL_ROOT` (default `$HOME`)
+- `PGFS_NAMESPACE` (default `dev`)
+- `PGFS_TYPE_ID` (default `claude`)
+- `PGFS_INCLUDE`, `PGFS_EXCLUDE` (comma/newline-delimited globs)
+
 Quality gates:
 
 ```bash
