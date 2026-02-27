@@ -62,4 +62,4 @@ Launcher env knobs:
 - `DBX_APP_TERMINAL_PI_CMD` (default `pi`)
 - `DBX_APP_TERMINAL_CLAUDE_MODEL` (optional Claude model override)
 - `DBX_APP_TERMINAL_CODEX_MODEL` (default `databricks-gpt-5-3-codex`)
-- `DBX_APP_TERMINAL_PI_FOOTER_EXTENSION` (optional path override; default `./extensions/top-footer-line/index.ts`)
+- `DBX_APP_TERMINAL_PI_FOOTER_EXTENSION` (optional path override; default `./terminal-types/pi/extensions/top-footer-line/index.ts`)

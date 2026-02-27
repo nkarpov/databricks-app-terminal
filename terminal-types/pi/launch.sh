@@ -5,7 +5,7 @@ __dbx_terminal_type_name="pi"
 __dbx_terminal_type_cmd="${DBX_APP_TERMINAL_PI_CMD:-pi}"
 __dbx_terminal_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 __dbx_terminal_shared_dir="${__dbx_terminal_root}/terminal-types/_shared"
-__dbx_pi_footer_extension="${DBX_APP_TERMINAL_PI_FOOTER_EXTENSION:-${__dbx_terminal_root}/extensions/top-footer-line/index.ts}"
+__dbx_pi_footer_extension="${DBX_APP_TERMINAL_PI_FOOTER_EXTENSION:-${__dbx_terminal_root}/terminal-types/pi/extensions/top-footer-line/index.ts}"
 
 dbx_pi_enable_databricks_xhigh() {
   local models_js="${__dbx_terminal_root}/node_modules/@mariozechner/pi-ai/dist/models.js"
