@@ -25,6 +25,8 @@ terminal-types/<type-id>/
   "badge": "claude",
   "icon": "✶",
   "authPolicy": "both",
+  "default": false,
+  "order": 20,
   "entrypoint": "launch.sh"
 }
 ```
@@ -40,6 +42,13 @@ Fields:
   - `both` (default): users can toggle between `m2m` and `user`
   - `user`: pinned to `user` mode (toggle disabled)
   - `m2m`: pinned to `m2m` mode (toggle disabled)
+- `default` (optional): marks this type as the default session type
+  - if multiple types set `default: true`, the app selects one by ordering rules and logs a warning
+  - if omitted for all custom types, built-in `terminal` remains default
+- `order` (optional): integer ordering hint for picker/tab ordering
+  - lower values appear first
+  - ordered types appear before unordered types
+  - tie-breakers: `default` then name
 - `entrypoint` (optional): launch script path relative to type folder, default `launch.sh`
 
 ## `launch.sh`

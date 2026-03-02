@@ -32,12 +32,14 @@ When running inside a Databricks App, terminal commands execute under the app's 
 
 Session types are discovered dynamically from `terminal-types/*` at startup.
 
-- Built-in default: `terminal` (base shell, no extra launch script)
+- Built-in fallback default: `terminal` (base shell, no extra launch script)
 - Custom type folder contract:
   - `terminal-types/<type-id>/type.json`
   - `terminal-types/<type-id>/launch.sh`
 - `type.json` can include optional `icon` (unicode/custom glyph string) for CLI-style picker display.
 - `type.json` can include optional `authPolicy` (`both` default, or pinned `user` / `m2m`).
+- `type.json` can include optional `default: true` to make that type the default session type.
+- `type.json` can include optional integer `order` to control picker/tab ordering (lower first).
 - Included profiles in this repo: `claude`, `codex`, `pi` (plus built-in `terminal`).
 - Bundled logo font assets live under `public/assets/terminal-icons` (source SVGs in `assets/terminal-icons/src`).
 - Type launch scripts run on top of the base terminal runtime/auth model.

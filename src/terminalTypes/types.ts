@@ -8,6 +8,7 @@ export type TerminalType = {
   icon?: string;
   authPolicy: TerminalTypeAuthPolicy;
   default: boolean;
+  order?: number;
   builtIn: boolean;
 };
 

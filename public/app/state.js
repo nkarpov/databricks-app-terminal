@@ -9,6 +9,7 @@ const DEFAULT_SESSION_TYPES = [
     icon: "⌂",
     authPolicy: "both",
     default: true,
+    order: 0,
     builtIn: true,
   },
 ];

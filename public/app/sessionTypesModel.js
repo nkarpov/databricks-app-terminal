@@ -6,16 +6,47 @@ function normalizeAuthPolicy(policy) {
   return policy === "user" || policy === "m2m" ? policy : "both";
 }
 
+function normalizeOrder(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.trunc(value);
+}
+
+function hasExplicitOrder(type) {
+  return typeof type.order === "number" && Number.isFinite(type.order);
+}
+
+function compareSessionTypes(a, b) {
+  const aOrdered = hasExplicitOrder(a);
+  const bOrdered = hasExplicitOrder(b);
+
+  if (aOrdered && bOrdered) {
+    const orderDiff = a.order - b.order;
+    if (orderDiff !== 0) {
+      return orderDiff;
+    }
+  }
+
+  if (aOrdered !== bOrdered) {
+    return aOrdered ? -1 : 1;
+  }
+
+  if (a.default !== b.default) {
+    return a.default ? -1 : 1;
+  }
+
+  const byName = String(a.name || a.id).localeCompare(String(b.name || b.id));
+  if (byName !== 0) {
+    return byName;
+  }
+
+  return String(a.id).localeCompare(String(b.id));
+}
+
 function sortedSessionTypes(list) {
-  return [...list].sort((a, b) => {
-    if (a.default) {
-      return -1;
-    }
-    if (b.default) {
-      return 1;
-    }
-    return String(a.name || a.id).localeCompare(String(b.name || b.id));
-  });
+  return [...list].sort(compareSessionTypes);
 }
 
 function fallbackType(typeId) {
@@ -28,6 +59,7 @@ function fallbackType(typeId) {
     icon: undefined,
     authPolicy: "both",
     default: false,
+    order: undefined,
     builtIn: false,
   };
 }
@@ -54,6 +86,7 @@ export function createSessionTypesModel(state) {
           icon: typeof type.icon === "string" && type.icon.length > 0 ? type.icon : undefined,
           authPolicy: normalizeAuthPolicy(type.authPolicy),
           default: Boolean(type.default),
+          order: normalizeOrder(type.order),
           builtIn: Boolean(type.builtIn),
         })),
       );
@@ -85,7 +118,11 @@ export function createSessionTypesModel(state) {
 
     defaultTypeId() {
       const found = state.sessionTypes.find((type) => type.default);
-      return found ? found.id : "terminal";
+      if (found) {
+        return found.id;
+      }
+
+      return state.sessionTypes[0]?.id || "terminal";
     },
 
     typeLogo(type) {
